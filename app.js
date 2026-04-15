@@ -20,11 +20,11 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
   const fmt = (n) =>
-    Number(n || 0).toLocaleString("pt-BR", {
+    Number(n || 0).toLocaleString("en-US", {
       style: "currency",
-      currency: "BRL",
+      currency: "USD",
     });
-  const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString("pt-BR") : "—");
+  const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString("en-US") : "—");
   const fmtDateInput = (ts) =>
     ts ? new Date(ts).toISOString().slice(0, 10) : "";
   const parseDate = (s) => (s ? new Date(s).getTime() : null);
@@ -114,7 +114,7 @@
           <div class="tTitle">${esc(title)}</div>
           ${msg ? `<div class="tMsg">${esc(msg)}</div>` : ""}
         </div>
-        <button type="button" class="tX" aria-label="Fechar">
+        <button type="button" class="tX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
@@ -178,15 +178,15 @@
     const m = modal.open(`
       <div class="modalHd">
         <div><h2>${esc(title)}</h2><p>${esc(body)}</p></div>
-        <button type="button" class="closeX" aria-label="Fechar">
+        <button type="button" class="closeX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
           </svg>
         </button>
       </div>
-      <div class="modalBd"><p class="muted">Esta ação não pode ser desfeita.</p></div>
+      <div class="modalBd"><p class="muted">This action cannot be undone.</p></div>
       <div class="modalFt">
-        <button type="button" class="btn" id="cCancel">Cancelar</button>
+        <button type="button" class="btn" id="cCancel">Cancel</button>
         <button type="button" class="btn danger" id="cOk">${esc(danger)}</button>
       </div>`);
     m.querySelector("#cCancel").addEventListener("click", modal.close);
@@ -202,7 +202,7 @@
     applyTheme(state.settings.theme);
     const wrap = $("#appContent");
     if (wrap)
-      wrap.innerHTML = `<div class="loadingPage"><div class="spinner"></div><span>Carregando…</span></div>`;
+      wrap.innerHTML = `<div class="loadingPage"><div class="spinner"></div><span>Loading…</span></div>`;
     try {
       await idb.open();
       [state.jobs, state.timeLogs, state.templates] = await Promise.all([
@@ -216,9 +216,9 @@
       registerSW();
     } catch (e) {
       console.error(e);
-      toast.error("Erro de banco de dados", "Falha ao carregar dados locais.");
+      toast.error("Database error", "Failed to load local data.");
       if (wrap)
-        wrap.innerHTML = `<div class="empty">Falha ao carregar. Recarregue a página.</div>`;
+        wrap.innerHTML = `<div class="empty">Failed to load. Please reload the page.</div>`;
     }
   }
 
@@ -246,13 +246,13 @@
     );
     if (overdue.length)
       toast.error(
-        "Prazo vencido",
-        `${overdue.length} job(s) com prazo expirado.`,
+        "Deadline overdue",
+        `${overdue.length} job(s) past their deadline.`,
       );
     if (upcoming.length)
       toast.warn(
-        "Prazo próximo",
-        `${upcoming.length} job(s) vencem em até 3 dias.`,
+        "Deadline soon",
+        `${upcoming.length} job(s) due within 3 days.`,
       );
   }
 
@@ -393,15 +393,15 @@
     a.click();
     URL.revokeObjectURL(a.href);
     toast.success(
-      "Backup exportado",
+      "Backup exported",
       `${state.jobs.length} jobs · ${state.templates.length} templates.`,
     );
   }
 
-  /* ─── PDF: Relatório do Job ──────────────────── */
+  /* ─── PDF: Job Report ───────────────────────── */
   function exportJobPDF(job) {
     if (!window.jspdf) {
-      toast.error("Erro PDF", "jsPDF não carregado.");
+      toast.error("PDF Error", "jsPDF not loaded.");
       return;
     }
     const { jsPDF } = window.jspdf;
@@ -423,7 +423,7 @@
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(120);
-    doc.text(`Relatório gerado em ${fmtDate(Date.now())}`, lm, y);
+    doc.text(`Report generated on ${fmtDate(Date.now())}`, lm, y);
     doc.setTextColor(0);
     y += 10;
     doc.line(lm, y, 196, y);
@@ -438,22 +438,22 @@
     };
     doc.setFontSize(11);
     infoRow("Job", job.name);
-    infoRow("Cliente", job.client || "—");
+    infoRow("Client", job.client || "—");
     infoRow("Status", job.status);
-    infoRow("Criado em", fmtDate(job.date));
-    if (job.startDate) infoRow("Início", fmtDate(job.startDate));
-    if (job.deadline) infoRow("Prazo", fmtDate(job.deadline));
-    infoRow("Valor Estimado", fmt(job.value));
+    infoRow("Created", fmtDate(job.date));
+    if (job.startDate) infoRow("Start Date", fmtDate(job.startDate));
+    if (job.deadline) infoRow("Deadline", fmtDate(job.deadline));
+    infoRow("Estimated Value", fmt(job.value));
     if (job.estimatedHours) {
-      infoRow("Horas Estimadas", `${job.estimatedHours}h`);
+      infoRow("Estimated Hours", `${job.estimatedHours}h`);
       const realHrs = state.timeLogs
         .filter((l) => l.jobId === job.id)
         .reduce((s, l) => s + (l.hours || 0), 0);
-      infoRow("Horas Reais", `${realHrs.toFixed(2)}h`);
+      infoRow("Actual Hours", `${realHrs.toFixed(2)}h`);
     }
     if (job.notes) {
       const lines = doc.splitTextToSize(job.notes, 140);
-      infoRow("Notas", lines[0]);
+      infoRow("Notes", lines[0]);
       lines.slice(1).forEach((l) => {
         doc.text(l, lm + 42, y);
         y += 6;
@@ -467,14 +467,14 @@
       y += 8;
       doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
-      doc.text("Detalhamento de Custos", lm, y);
+      doc.text("Cost Breakdown", lm, y);
       y += 8;
       doc.setFontSize(9);
       doc.setFillColor(20, 30, 55);
       doc.rect(lm, y - 5, 182, 7, "F");
       doc.setTextColor(200, 210, 230);
       const cols = [lm + 1, 88, 126, 145, 173];
-      ["Descrição", "Categoria", "Qtd", "Custo Unit.", "Total"].forEach(
+      ["Description", "Category", "Qty", "Unit Cost", "Total"].forEach(
         (h, i) => doc.text(h, cols[i], y),
       );
       y += 5;
@@ -508,9 +508,9 @@
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       [
-        `Custo Total: ${fmt(tc)}`,
-        `Valor Estimado: ${fmt(job.value)}`,
-        `Lucro / Prejuízo: ${fmt(margin)} (${pct}%)`,
+        `Total Cost: ${fmt(tc)}`,
+        `Estimated Value: ${fmt(job.value)}`,
+        `Profit / Loss: ${fmt(margin)} (${pct}%)`,
       ].forEach((t) => {
         doc.text(t, lm, y);
         y += 7;
@@ -524,15 +524,15 @@
       y += 8;
       doc.setFontSize(13);
       doc.setFont("helvetica", "bold");
-      doc.text("Registro de Horas", lm, y);
+      doc.text("Time Logs", lm, y);
       y += 8;
       doc.setFontSize(9);
       doc.setFillColor(20, 30, 55);
       doc.rect(lm, y - 5, 150, 7, "F");
       doc.setTextColor(200, 210, 230);
-      doc.text("Data", lm + 1, y);
-      doc.text("Horas", lm + 42, y);
-      doc.text("Observação", lm + 70, y);
+      doc.text("Date", lm + 1, y);
+      doc.text("Hours", lm + 42, y);
+      doc.text("Note", lm + 70, y);
       y += 5;
       doc.setTextColor(0);
       logs
@@ -562,19 +562,19 @@
     }
 
     doc.save(
-      `${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 48)}_relatorio.pdf`,
+      `${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 48)}_report.pdf`,
     );
-    toast.success("PDF exportado", job.name);
+    toast.success("PDF exported", job.name);
   }
 
-  /* ─── PDF: Relatório Geral ───────────────────── */
+  /* ─── PDF: Full Report ───────────────────────── */
   function exportAllPDF() {
     if (!window.jspdf) {
-      toast.error("Erro PDF", "jsPDF não carregado.");
+      toast.error("PDF Error", "jsPDF not loaded.");
       return;
     }
     if (!state.jobs.length) {
-      toast.warn("Sem dados", "Nenhum job para exportar.");
+      toast.warn("No data", "No jobs to export.");
       return;
     }
     const { jsPDF } = window.jspdf;
@@ -584,7 +584,7 @@
 
     doc.setFontSize(18);
     doc.setFont("helvetica", "bold");
-    doc.text("JobCost Pro — Relatório Geral", lm, y);
+    doc.text("JobCost Pro — Full Report", lm, y);
     if (state.settings.company) {
       doc.setFontSize(11);
       doc.setFont("helvetica", "normal");
@@ -597,7 +597,7 @@
     doc.setFont("helvetica", "normal");
     doc.setTextColor(120);
     doc.text(
-      `Gerado em ${fmtDate(Date.now())} · ${state.jobs.length} jobs`,
+      `Generated on ${fmtDate(Date.now())} · ${state.jobs.length} jobs`,
       lm,
       y,
     );
@@ -612,7 +612,7 @@
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.text(
-      `Valor Total: ${fmt(totalVal)}   Custo Total: ${fmt(totalCost)}   Horas: ${totalHrs.toFixed(1)}h`,
+      `Total Value: ${fmt(totalVal)}   Total Cost: ${fmt(totalCost)}   Hours: ${totalHrs.toFixed(1)}h`,
       lm,
       y,
     );
@@ -625,12 +625,12 @@
     const cols = [lm + 1, 88, 130, 165, 200, 235, 262];
     [
       "Job",
-      "Cliente",
+      "Client",
       "Status",
-      "Valor Est.",
-      "Custo Total",
-      "Margem",
-      "Prazo",
+      "Est. Value",
+      "Total Cost",
+      "Margin",
+      "Deadline",
     ].forEach((h, i) => doc.text(h, cols[i], y));
     y += 5;
     doc.setTextColor(0);
@@ -662,17 +662,17 @@
         y += 7;
       });
 
-    doc.save(`jobcost_relatorio_geral_${Date.now()}.pdf`);
+    doc.save(`jobcost_full_report_${Date.now()}.pdf`);
     toast.success(
-      "Relatório exportado",
-      `${state.jobs.length} jobs incluídos.`,
+      "Report exported",
+      `${state.jobs.length} jobs included.`,
     );
   }
 
-  /* ─── PDF: Fatura ────────────────────────────── */
+  /* ─── PDF: Invoice ───────────────────────────── */
   function exportInvoicePDF(job) {
     if (!window.jspdf) {
-      toast.error("Erro PDF", "jsPDF não carregado.");
+      toast.error("PDF Error", "jsPDF not loaded.");
       return;
     }
     const { jsPDF } = window.jspdf;
@@ -684,7 +684,7 @@
     doc.setFontSize(28);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 50, 100);
-    doc.text("FATURA", lm, y);
+    doc.text("INVOICE", lm, y);
     doc.setTextColor(0);
     doc.setFontSize(11);
     doc.setFont("helvetica", "normal");
@@ -692,7 +692,7 @@
     doc.text(state.settings.company || "JobCost Pro", lm, y + 9);
     doc.setTextColor(0);
     doc.setFontSize(10);
-    doc.text(`Data: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+    doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
     doc.text(`Ref: ${job.name.slice(0, 40)}`, rr, y + 7, { align: "right" });
     y += 22;
     doc.setDrawColor(180, 185, 200);
@@ -701,7 +701,7 @@
 
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text("Para:", lm, y);
+    doc.text("Bill To:", lm, y);
     doc.setFont("helvetica", "normal");
     doc.text(job.client || "—", lm, y + 7);
     y += 20;
@@ -713,7 +713,7 @@
       doc.rect(lm, y - 5, 182, 7, "F");
       doc.setTextColor(200, 210, 230);
       const cols = [lm + 1, 90, 122, 145, 173];
-      ["Descrição", "Categoria", "Qtd", "Valor Unit.", "Total"].forEach(
+      ["Description", "Category", "Qty", "Unit Price", "Total"].forEach(
         (h, i) => doc.text(h, cols[i], y),
       );
       y += 5;
@@ -741,7 +741,7 @@
     } else {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
-      doc.text("Serviços prestados conforme acordado.", lm, y);
+      doc.text("Services rendered as agreed.", lm, y);
       y += 10;
     }
 
@@ -753,7 +753,7 @@
     doc.setFont("helvetica", "bold");
     doc.setFontSize(14);
     doc.setTextColor(30, 50, 100);
-    doc.text(`TOTAL: ${fmt(total)}`, rr, y, { align: "right" });
+    doc.text(`TOTAL DUE: ${fmt(total)}`, rr, y, { align: "right" });
     doc.setTextColor(0);
 
     if (job.notes) {
@@ -761,7 +761,7 @@
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100);
-      doc.text("Observações:", lm, y);
+      doc.text("Notes:", lm, y);
       y += 6;
       doc
         .splitTextToSize(job.notes, 170)
@@ -772,8 +772,8 @@
         });
     }
 
-    doc.save(`fatura_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
-    toast.success("Fatura exportada", job.name);
+    doc.save(`invoice_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
+    toast.success("Invoice exported", job.name);
   }
 
   /* ─── Sort helpers ───────────────────────────── */
@@ -796,6 +796,74 @@
   const th = (col, lbl, align = "") =>
     `<th class="sortable" data-sort="${col}"${align ? ` style="text-align:${align}"` : ""}>${lbl}${sortIco(col)}</th>`;
 
+  /* ─── US APIs ────────────────────────────────── */
+  function lookupZIP(zip, onResult) {
+    const clean = (zip || "").replace(/\D/g, "").slice(0, 5);
+    if (clean.length !== 5) return;
+    fetch(`https://api.zippopotam.us/us/${clean}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.places && data.places[0]) {
+          const p = data.places[0];
+          onResult(p["place name"] || "", p["state abbreviation"] || "");
+        }
+      })
+      .catch(() => {});
+  }
+
+  function reverseGeocode(lat, lng, onResult) {
+    fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      { headers: { "Accept-Language": "en-US" } },
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.address) return;
+        const a = data.address;
+        const parts = [
+          a.house_number ? `${a.house_number} ${a.road || ""}`.trim() : a.road,
+          a.city || a.town || a.village || a.county,
+          a.state,
+        ].filter(Boolean);
+        if (parts.length) onResult(parts.join(", "));
+      })
+      .catch(() => {});
+  }
+
+  function shareText(title, text) {
+    if (navigator.share) {
+      navigator.share({ title, text }).catch(() => {});
+    } else if (navigator.clipboard) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => toast.info("Copied", "Job summary copied to clipboard."))
+        .catch(() => toast.error("Error", "Could not copy to clipboard."));
+    }
+  }
+
+  function shareJob(job) {
+    const tc = jobCost(job);
+    const margin = (job.value || 0) - tc;
+    const pct = job.value ? ((margin / job.value) * 100).toFixed(1) : null;
+    const hrs = state.timeLogs
+      .filter((l) => l.jobId === job.id)
+      .reduce((s, l) => s + (l.hours || 0), 0);
+    const lines = [
+      `📋 ${job.name}`,
+      job.client ? `👤 Client: ${job.client}` : null,
+      `📌 Status: ${job.status}`,
+      job.deadline ? `📅 Deadline: ${fmtDate(job.deadline)}` : null,
+      job.value ? `💰 Value: ${fmt(job.value)}` : null,
+      tc ? `💸 Costs: ${fmt(tc)}` : null,
+      pct !== null ? `📈 Margin: ${fmt(margin)} (${pct}%)` : null,
+      hrs ? `⏱ Hours: ${hrs.toFixed(2)}h` : null,
+      job.notes ? `📝 Notes: ${job.notes}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    shareText(job.name, lines);
+  }
+
   /* ─── Save helpers ───────────────────────────── */
   async function saveJob(job) {
     await idb.put(APP.stores.jobs, job);
@@ -809,7 +877,7 @@
     const copy = {
       ...job,
       id: uid(),
-      name: `${job.name} (Cópia)`,
+      name: `${job.name} (Copy)`,
       status: "Draft",
       date: Date.now(),
       statusHistory: [{ status: "Draft", date: Date.now() }],
@@ -817,7 +885,7 @@
       photos: [],
     };
     saveJob(copy).then(() => {
-      toast.success("Job duplicado", copy.name);
+      toast.success("Job duplicated", copy.name);
       render();
     });
   }
@@ -827,7 +895,7 @@
     const isEdit = !!job;
     const STATUS = ["Draft", "Active", "Completed", "Invoiced"];
     const tplOpts = state.templates.length
-      ? `<option value="">— nenhum —</option>` +
+      ? `<option value="">— none —</option>` +
         state.templates
           .map((t) => `<option value="${t.id}">${esc(t.name)}</option>`)
           .join("")
@@ -836,22 +904,22 @@
     const m = modal.open(`
       <div class="modalHd">
         <div>
-          <h2>${isEdit ? "Editar Job" : "Novo Job"}</h2>
-          <p>${isEdit ? esc(job.name) : "Preencha os dados do job."}</p>
+          <h2>${isEdit ? "Edit Job" : "New Job"}</h2>
+          <p>${isEdit ? esc(job.name) : "Fill in the job details."}</p>
         </div>
-        <button type="button" class="closeX" aria-label="Fechar">
+        <button type="button" class="closeX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
       <div class="modalBd">
         <div class="fieldGrid">
           <div class="field">
-            <label for="fjN">Nome do Job *</label>
-            <input id="fjN" class="input" type="text" maxlength="120" placeholder="ex: Reforma Cozinha" value="${isEdit ? esc(job.name) : ""}"/>
+            <label for="fjN">Job Name *</label>
+            <input id="fjN" class="input" type="text" maxlength="120" placeholder="e.g. Kitchen Remodel" value="${isEdit ? esc(job.name) : ""}"/>
           </div>
           <div class="field">
-            <label for="fjC">Cliente</label>
-            <input id="fjC" class="input" type="text" maxlength="120" placeholder="Nome do cliente" value="${isEdit ? esc(job.client || "") : ""}"/>
+            <label for="fjC">Client</label>
+            <input id="fjC" class="input" type="text" maxlength="120" placeholder="Client name" value="${isEdit ? esc(job.client || "") : ""}"/>
           </div>
           <div class="field">
             <label for="fjSt">Status</label>
@@ -860,40 +928,61 @@
             </select>
           </div>
           <div class="field">
-            <label for="fjV">Valor Estimado (R$)</label>
-            <input id="fjV" class="input" type="number" min="0" step="0.01" placeholder="0,00" value="${isEdit ? job.value || "" : ""}"/>
+            <label for="fjV">Estimated Value ($)</label>
+            <input id="fjV" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? job.value || "" : ""}"/>
           </div>
           <div class="field">
-            <label for="fjSD">Data de Início</label>
+            <label for="fjSD">Start Date</label>
             <input id="fjSD" class="input" type="date" value="${isEdit ? fmtDateInput(job.startDate) : ""}"/>
           </div>
           <div class="field">
-            <label for="fjDL">Prazo / Entrega</label>
+            <label for="fjDL">Deadline</label>
             <input id="fjDL" class="input" type="date" value="${isEdit ? fmtDateInput(job.deadline) : ""}"/>
           </div>
           <div class="field">
-            <label for="fjEH">Horas Estimadas</label>
-            <input id="fjEH" class="input" type="number" min="0" step="0.5" placeholder="ex: 40" value="${isEdit ? job.estimatedHours || "" : ""}"/>
+            <label for="fjEH">Estimated Hours</label>
+            <input id="fjEH" class="input" type="number" min="0" step="0.5" placeholder="e.g. 40" value="${isEdit ? job.estimatedHours || "" : ""}"/>
+          </div>
+          <div class="field">
+            <label for="fjZip">ZIP Code</label>
+            <input id="fjZip" class="input" type="text" maxlength="10" placeholder="e.g. 90210" value="${isEdit ? esc(job.zip || "") : ""}"/>
+          </div>
+          <div class="field">
+            <label for="fjCity">City</label>
+            <input id="fjCity" class="input" type="text" maxlength="80" placeholder="Auto-filled from ZIP" value="${isEdit ? esc(job.city || "") : ""}"/>
+          </div>
+          <div class="field">
+            <label for="fjState">State</label>
+            <input id="fjState" class="input" type="text" maxlength="30" placeholder="e.g. CA" value="${isEdit ? esc(job.state || "") : ""}"/>
           </div>
           ${
             !isEdit && tplOpts
               ? `
           <div class="field">
-            <label for="fjT">Aplicar Template</label>
+            <label for="fjT">Apply Template</label>
             <select id="fjT">${tplOpts}</select>
           </div>`
               : ""
           }
           <div class="field" style="grid-column:1/-1;">
-            <label for="fjNo">Notas</label>
-            <textarea id="fjNo" placeholder="Descrição, observações…">${isEdit ? esc(job.notes || "") : ""}</textarea>
+            <label for="fjNo">Notes</label>
+            <textarea id="fjNo" placeholder="Description, notes…">${isEdit ? esc(job.notes || "") : ""}</textarea>
           </div>
         </div>
       </div>
       <div class="modalFt">
-        <button type="button" class="btn" id="fjCancel">Cancelar</button>
-        <button type="button" class="btn primary" id="fjSave">${isEdit ? "Salvar Alterações" : "Criar Job"}</button>
+        <button type="button" class="btn" id="fjCancel">Cancel</button>
+        <button type="button" class="btn primary" id="fjSave">${isEdit ? "Save Changes" : "Create Job"}</button>
       </div>`);
+
+    /* ZIP code auto-fill */
+    m.querySelector("#fjZip")?.addEventListener("blur", () => {
+      const zip = m.querySelector("#fjZip").value.trim();
+      lookupZIP(zip, (city, state) => {
+        if (!m.querySelector("#fjCity").value) m.querySelector("#fjCity").value = city;
+        if (!m.querySelector("#fjState").value) m.querySelector("#fjState").value = state;
+      });
+    });
 
     m.querySelector("#fjCancel").addEventListener("click", modal.close);
     m.querySelector("#fjSave").addEventListener("click", () => {
@@ -931,6 +1020,9 @@
         deadline: parseDate(m.querySelector("#fjDL").value),
         estimatedHours: parseFloat(m.querySelector("#fjEH").value) || null,
         notes: m.querySelector("#fjNo").value.trim(),
+        zip: m.querySelector("#fjZip").value.trim(),
+        city: m.querySelector("#fjCity").value.trim(),
+        state: m.querySelector("#fjState").value.trim(),
         date: isEdit ? job.date : Date.now(),
         costs: isEdit
           ? job.costs || []
@@ -943,12 +1035,12 @@
 
       saveJob(saved)
         .then(() => {
-          toast.success(isEdit ? "Job atualizado" : "Job criado", saved.name);
+          toast.success(isEdit ? "Job updated" : "Job created", saved.name);
           modal.close();
           render();
         })
         .catch(() =>
-          toast.error("Erro ao salvar", "Não foi possível salvar o job."),
+          toast.error("Save error", "Could not save the job."),
         );
     });
   }
@@ -956,7 +1048,7 @@
   /* ─── Job Detail Modal (tabbed) ──────────────── */
   function openJobDetailModal(job) {
     let tab = "overview";
-    const CATS = ["Materiais", "Mão de Obra", "Subcontratado", "Outros"];
+    const CATS = ["Materials", "Labor", "Subcontracted", "Other"];
 
     const getTC = () => jobCost(job);
     const getMargin = () => (job.value || 0) - getTC();
@@ -979,42 +1071,45 @@
         !["Completed", "Invoiced"].includes(job.status);
       return `
         <div class="fieldGrid" style="margin-bottom:16px;">
-          <div class="field"><label>Cliente</label>
+          <div class="field"><label>Client</label>
             <div class="infoVal">${esc(job.client || "—")}</div></div>
           <div class="field"><label>Status</label>
             <div style="padding:4px 0;"><span class="badge status-${job.status.toLowerCase()}">${job.status}</span></div></div>
-          <div class="field"><label>Início</label>
+          <div class="field"><label>Start Date</label>
             <div class="infoVal muted">${fmtDate(job.startDate)}</div></div>
-          <div class="field"><label>Prazo</label>
+          <div class="field"><label>Deadline</label>
             <div class="infoVal ${deadlinePast ? "deadlineWarn" : "muted"}">${fmtDate(job.deadline)}${deadlinePast ? " ⚠" : ""}</div></div>
-          <div class="field"><label>Valor Estimado</label>
+          <div class="field"><label>Estimated Value</label>
             <div class="infoVal bigVal">${fmt(job.value)}</div></div>
-          <div class="field"><label>Criado em</label>
+          <div class="field"><label>Created</label>
             <div class="infoVal muted">${fmtDate(job.date)}</div></div>
+          ${job.city || job.state ? `
+          <div class="field"><label>Location</label>
+            <div class="infoVal">${[job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</div></div>` : ""}
           ${
             job.estimatedHours
               ? `
-          <div class="field"><label>Horas Estimadas</label>
+          <div class="field"><label>Estimated Hours</label>
             <div class="infoVal">${job.estimatedHours}h</div></div>
-          <div class="field"><label>Horas Reais</label>
+          <div class="field"><label>Actual Hours</label>
             <div class="infoVal" style="color:${realHrs > job.estimatedHours ? "var(--danger)" : "var(--ok)"};">
-              ${realHrs.toFixed(2)}h ${realHrs > job.estimatedHours ? "⚠ Excedido" : "✓"}
+              ${realHrs.toFixed(2)}h ${realHrs > job.estimatedHours ? "⚠ Over budget" : "✓"}
             </div></div>`
               : ""
           }
           ${
             job.notes
               ? `
-          <div class="field" style="grid-column:1/-1;"><label>Notas</label>
+          <div class="field" style="grid-column:1/-1;"><label>Notes</label>
             <div class="notesBox">${esc(job.notes)}</div></div>`
               : ""
           }
         </div>
         <div class="summary" style="margin-bottom:16px;">
-          <div class="summaryRow"><span class="k">Custo Total dos Itens</span><strong>${fmt(tc)}</strong></div>
-          <div class="summaryRow"><span class="k">Valor Estimado</span><strong>${fmt(job.value)}</strong></div>
+          <div class="summaryRow"><span class="k">Total Item Cost</span><strong>${fmt(tc)}</strong></div>
+          <div class="summaryRow"><span class="k">Estimated Value</span><strong>${fmt(job.value)}</strong></div>
           <div class="summaryRow total">
-            <span class="k">Lucro / Prejuízo</span>
+            <span class="k">Profit / Loss</span>
             <strong style="color:${m >= 0 ? "var(--ok)" : "var(--danger)"}">
               ${fmt(m)}${pct !== null ? ` (${pct}%)` : ""}
             </strong>
@@ -1024,7 +1119,7 @@
           history.length > 1
             ? `
         <div class="historyBlock">
-          <div class="historyTitle">HISTÓRICO DE STATUS</div>
+          <div class="historyTitle">STATUS HISTORY</div>
           <div class="historyList">
             ${history
               .map(
@@ -1049,7 +1144,7 @@
         pct = getPct();
       const rows =
         costs.length === 0
-          ? `<tr><td colspan="6" class="muted" style="padding:18px;text-align:center;">Nenhum item de custo ainda.</td></tr>`
+          ? `<tr><td colspan="6" class="muted" style="padding:18px;text-align:center;">No cost items yet.</td></tr>`
           : costs
               .map(
                 (c, i) => `
@@ -1060,7 +1155,7 @@
               <td style="text-align:right;">${fmt(c.unitCost)}</td>
               <td style="text-align:right;"><strong>${fmt((c.qty || 0) * (c.unitCost || 0))}</strong></td>
               <td>
-                <button class="btn danger" data-dci="${i}" style="padding:4px 10px;font-size:11px;">Remover</button>
+                <button class="btn danger" data-dci="${i}" style="padding:4px 10px;font-size:11px;">Remove</button>
               </td>
             </tr>`,
               )
@@ -1069,9 +1164,9 @@
         <div class="tableWrap" style="margin-bottom:14px;">
           <table class="table">
             <thead><tr>
-              <th>Descrição</th><th>Categoria</th>
-              <th style="text-align:right;">Qtd</th>
-              <th style="text-align:right;">Custo Unit.</th>
+              <th>Description</th><th>Category</th>
+              <th style="text-align:right;">Qty</th>
+              <th style="text-align:right;">Unit Cost</th>
               <th style="text-align:right;">Total</th>
               <th></th>
             </tr></thead>
@@ -1079,17 +1174,17 @@
           </table>
         </div>
         <div class="addCostGrid">
-          <div class="field"><label for="fcD">Descrição</label><input id="fcD" class="input" type="text" maxlength="100" placeholder="ex: Drywall"/></div>
-          <div class="field"><label for="fcC">Categoria</label><select id="fcC">${CATS.map((c) => `<option>${c}</option>`).join("")}</select></div>
-          <div class="field"><label for="fcQ">Qtd</label><input id="fcQ" class="input" type="number" min="0.01" step="0.01" value="1"/></div>
-          <div class="field"><label for="fcU">Custo Unit. (R$)</label><input id="fcU" class="input" type="number" min="0" step="0.01" placeholder="0,00"/></div>
-          <div class="field addCostBtn"><label style="visibility:hidden">a</label><button type="button" class="btn primary" id="btnAC">+ Adicionar</button></div>
+          <div class="field"><label for="fcD">Description</label><input id="fcD" class="input" type="text" maxlength="100" placeholder="e.g. Drywall"/></div>
+          <div class="field"><label for="fcC">Category</label><select id="fcC">${CATS.map((c) => `<option>${c}</option>`).join("")}</select></div>
+          <div class="field"><label for="fcQ">Qty</label><input id="fcQ" class="input" type="number" min="0.01" step="0.01" value="1"/></div>
+          <div class="field"><label for="fcU">Unit Cost ($)</label><input id="fcU" class="input" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+          <div class="field addCostBtn"><label style="visibility:hidden">a</label><button type="button" class="btn primary" id="btnAC">+ Add</button></div>
         </div>
         <div class="summary">
-          <div class="summaryRow"><span class="k">Custo Total</span><strong>${fmt(tc)}</strong></div>
-          <div class="summaryRow"><span class="k">Valor Estimado</span><strong>${fmt(job.value)}</strong></div>
+          <div class="summaryRow"><span class="k">Total Cost</span><strong>${fmt(tc)}</strong></div>
+          <div class="summaryRow"><span class="k">Estimated Value</span><strong>${fmt(job.value)}</strong></div>
           <div class="summaryRow total">
-            <span class="k">Lucro / Prejuízo</span>
+            <span class="k">Profit / Loss</span>
             <strong style="color:${m >= 0 ? "var(--ok)" : "var(--danger)"}">
               ${fmt(m)}${pct !== null ? ` (${pct}%)` : ""}
             </strong>
@@ -1104,14 +1199,14 @@
         .sort((a, b) => b.date - a.date);
       const total = logs.reduce((s, l) => s + (l.hours || 0), 0);
       if (!logs.length)
-        return `<div class="empty">Nenhum registro de horas para este job.</div>`;
+        return `<div class="empty">No time logs for this job.</div>`;
       return `
         <div class="tableWrap" style="margin-bottom:14px;">
           <table class="table">
             <thead><tr>
-              <th>Data</th>
-              <th style="text-align:right;">Horas</th>
-              <th>Observação</th>
+              <th>Date</th>
+              <th style="text-align:right;">Hours</th>
+              <th>Note</th>
               <th></th>
             </tr></thead>
             <tbody>
@@ -1123,7 +1218,7 @@
                   <td style="text-align:right;"><strong>${(l.hours || 0).toFixed(2)}h</strong></td>
                   <td><span class="small">${l.note ? esc(l.note) : `<span class="faint">—</span>`}</span></td>
                   <td>
-                    <button class="btn danger" data-dtl="${l.id}" style="padding:4px 10px;font-size:11px;">Remover</button>
+                    <button class="btn danger" data-dtl="${l.id}" style="padding:4px 10px;font-size:11px;">Remove</button>
                   </td>
                 </tr>`,
                 )
@@ -1132,8 +1227,8 @@
           </table>
         </div>
         <div class="summaryRow">
-          <span class="k">Total Registrado</span>
-          <strong>${total.toFixed(2)}h${job.estimatedHours ? ` / ${job.estimatedHours}h estimadas` : ""}</strong>
+          <span class="k">Total Logged</span>
+          <strong>${total.toFixed(2)}h${job.estimatedHours ? ` / ${job.estimatedHours}h estimated` : ""}</strong>
         </div>`;
     };
 
@@ -1146,21 +1241,21 @@
             <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
-            Adicionar Fotos
+            Add Photos
             <input type="file" id="photoInput" accept="image/*" multiple style="display:none;"/>
           </label>
-          <span class="small">${photos.length}/10 fotos</span>
+          <span class="small">${photos.length}/10 photos</span>
         </div>
         ${
           photos.length === 0
-            ? `<div class="empty">Nenhuma foto adicionada ainda.<br><span class="small">Fotos são salvas localmente no dispositivo.</span></div>`
+            ? `<div class="empty">No photos added yet.<br><span class="small">Photos are stored locally on this device.</span></div>`
             : `<div class="photoGrid">
               ${photos
                 .map(
                   (p) => `
                 <div class="photoThumb">
                   <img src="${p.data}" alt="${esc(p.name)}" loading="lazy" data-pid="${p.id}"/>
-                  <button class="photoDelBtn" data-pid="${p.id}" aria-label="Remover foto">✕</button>
+                  <button class="photoDelBtn" data-pid="${p.id}" aria-label="Remove photo">✕</button>
                 </div>`,
                 )
                 .join("")}
@@ -1170,10 +1265,10 @@
 
     const TABS = ["overview", "costs", "timelogs", "photos"];
     const TAB_LABELS = {
-      overview: "Visão Geral",
-      costs: "Custos",
-      timelogs: "Horas",
-      photos: "Fotos",
+      overview: "Overview",
+      costs: "Costs",
+      timelogs: "Hours",
+      photos: "Photos",
     };
 
     const tabsHTML = () =>
@@ -1189,10 +1284,10 @@
           <p>
             ${job.client ? `${esc(job.client)} · ` : ""}
             <span class="badge status-${job.status.toLowerCase()}" style="font-size:11px;padding:2px 8px;">${job.status}</span>
-            ${job.deadline ? ` · Prazo: ${fmtDate(job.deadline)}` : ""}
+            ${job.deadline ? ` · Deadline: ${fmtDate(job.deadline)}` : ""}
           </p>
         </div>
-        <button type="button" class="closeX" aria-label="Fechar">
+        <button type="button" class="closeX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
@@ -1201,11 +1296,12 @@
         <div id="detailContent">${overviewHTML()}</div>
       </div>
       <div class="modalFt">
-        <button type="button" class="btn admin-only" id="bjDup">Duplicar</button>
-        <button type="button" class="btn admin-only" id="bjEdit">Editar</button>
-        <button type="button" class="btn admin-only" id="bjInvoice">Fatura PDF</button>
-        <button type="button" class="btn primary admin-only" id="bjPDF">Relatório PDF</button>
-        <button type="button" class="btn" id="bjClose">Fechar</button>
+        <button type="button" class="btn admin-only" id="bjDup">Duplicate</button>
+        <button type="button" class="btn admin-only" id="bjEdit">Edit</button>
+        <button type="button" class="btn admin-only" id="bjShare">Share</button>
+        <button type="button" class="btn admin-only" id="bjInvoice">Invoice PDF</button>
+        <button type="button" class="btn primary admin-only" id="bjPDF">Report PDF</button>
+        <button type="button" class="btn" id="bjClose">Close</button>
       </div>`);
 
     function switchTab(newTab) {
@@ -1263,7 +1359,7 @@
             render();
           })
           .catch(() =>
-            toast.error("Erro ao salvar", "Não foi possível salvar item."),
+            toast.error("Save error", "Could not save cost item."),
           );
       });
     }
@@ -1280,7 +1376,7 @@
               render();
             })
             .catch(() =>
-              toast.error("Erro", "Não foi possível remover registro."),
+              toast.error("Error", "Could not remove time log."),
             );
         });
       });
@@ -1292,14 +1388,14 @@
         if (!files.length) return;
         const current = (job.photos || []).length;
         if (current >= 10) {
-          toast.warn("Limite atingido", "Máximo de 10 fotos por job.");
+          toast.warn("Limit reached", "Maximum 10 photos per job.");
           return;
         }
         const toAdd = files.slice(0, 10 - current);
         let done = 0;
         toAdd.forEach((file) => {
           if (file.size > 8 * 1024 * 1024) {
-            toast.warn("Arquivo grande", `${file.name} excede 8MB.`);
+            toast.warn("File too large", `${file.name} exceeds 8MB.`);
             done++;
             if (done === toAdd.length) switchTab("photos");
             return;
@@ -1358,8 +1454,8 @@
           lb.className = "lightbox";
           lb.innerHTML = `
             <div class="lightboxBg"></div>
-            <img src="${img.src}" class="lightboxImg" alt="Foto"/>
-            <button class="lightboxClose" aria-label="Fechar">✕</button>`;
+            <img src="${img.src}" class="lightboxImg" alt="Photo"/>
+            <button class="lightboxClose" aria-label="Close">✕</button>`;
           document.body.appendChild(lb);
           const closeLb = () => lb.remove();
           lb.querySelector(".lightboxBg").addEventListener("click", closeLb);
@@ -1385,6 +1481,7 @@
       modal.close();
       openJobModal(job);
     });
+    m.querySelector("#bjShare").addEventListener("click", () => shareJob(job));
     m.querySelector("#bjInvoice").addEventListener("click", () =>
       exportInvoicePDF(job),
     );
@@ -1397,14 +1494,14 @@
   /* ─── Template Modal ─────────────────────────── */
   function openTemplateModal(tpl) {
     const isEdit = !!tpl;
-    const CATS = ["Materiais", "Mão de Obra", "Subcontratado", "Outros"];
+    const CATS = ["Materials", "Labor", "Subcontracted", "Other"];
     const w = isEdit
       ? { ...tpl, costs: (tpl.costs || []).map((c) => ({ ...c })) }
       : { id: uid(), name: "", description: "", date: Date.now(), costs: [] };
 
     const costRows = () =>
       w.costs.length === 0
-        ? `<tr><td colspan="5" class="muted" style="padding:14px;text-align:center;">Nenhum item ainda.</td></tr>`
+        ? `<tr><td colspan="5" class="muted" style="padding:14px;text-align:center;">No items yet.</td></tr>`
         : w.costs
             .map(
               (c, i) => `
@@ -1413,7 +1510,7 @@
               <td>${esc(c.category || "")}</td>
               <td style="text-align:right;">${c.qty}</td>
               <td style="text-align:right;">${fmt(c.unitCost)}</td>
-              <td><button class="btn danger" data-dtc="${i}" style="padding:4px 10px;font-size:11px;">Remover</button></td>
+              <td><button class="btn danger" data-dtc="${i}" style="padding:4px 10px;font-size:11px;">Remove</button></td>
             </tr>`,
             )
             .join("");
@@ -1421,49 +1518,49 @@
     const m = modal.open(`
       <div class="modalHd">
         <div>
-          <h2>${isEdit ? "Editar Template" : "Novo Template"}</h2>
-          <p>Templates pré-preenchem itens de custo ao criar um novo job.</p>
+          <h2>${isEdit ? "Edit Template" : "New Template"}</h2>
+          <p>Templates pre-fill cost items when creating a new job.</p>
         </div>
-        <button type="button" class="closeX" aria-label="Fechar">
+        <button type="button" class="closeX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
       </div>
       <div class="modalBd" style="display:flex;flex-direction:column;gap:16px;">
         <div class="fieldGrid">
           <div class="field">
-            <label for="ftN">Nome *</label>
-            <input id="ftN" class="input" type="text" maxlength="100" placeholder="ex: Reforma Padrão" value="${isEdit ? esc(tpl.name) : ""}"/>
+            <label for="ftN">Name *</label>
+            <input id="ftN" class="input" type="text" maxlength="100" placeholder="e.g. Standard Remodel" value="${isEdit ? esc(tpl.name) : ""}"/>
           </div>
           <div class="field">
-            <label for="ftD">Descrição</label>
-            <input id="ftD" class="input" type="text" maxlength="200" placeholder="Opcional" value="${isEdit ? esc(tpl.description || "") : ""}"/>
+            <label for="ftD">Description</label>
+            <input id="ftD" class="input" type="text" maxlength="200" placeholder="Optional" value="${isEdit ? esc(tpl.description || "") : ""}"/>
           </div>
         </div>
         <div>
-          <strong style="display:block;margin-bottom:8px;font-size:13px;">Itens de Custo Padrão</strong>
+          <strong style="display:block;margin-bottom:8px;font-size:13px;">Default Cost Items</strong>
           <div class="tableWrap" style="margin-bottom:10px;">
             <table class="table">
               <thead><tr>
-                <th>Descrição</th><th>Categoria</th>
-                <th style="text-align:right;">Qtd</th>
-                <th style="text-align:right;">Custo Unit.</th>
+                <th>Description</th><th>Category</th>
+                <th style="text-align:right;">Qty</th>
+                <th style="text-align:right;">Unit Cost</th>
                 <th></th>
               </tr></thead>
               <tbody id="tTbody">${costRows()}</tbody>
             </table>
           </div>
           <div class="addCostGrid">
-            <div class="field"><label for="ftcD">Descrição</label><input id="ftcD" class="input" type="text" maxlength="100" placeholder="Item"/></div>
-            <div class="field"><label for="ftcC">Categoria</label><select id="ftcC">${CATS.map((c) => `<option>${c}</option>`).join("")}</select></div>
-            <div class="field"><label for="ftcQ">Qtd</label><input id="ftcQ" class="input" type="number" min="0.01" step="0.01" value="1"/></div>
-            <div class="field"><label for="ftcU">Custo Unit. (R$)</label><input id="ftcU" class="input" type="number" min="0" step="0.01" placeholder="0,00"/></div>
+            <div class="field"><label for="ftcD">Description</label><input id="ftcD" class="input" type="text" maxlength="100" placeholder="Item"/></div>
+            <div class="field"><label for="ftcC">Category</label><select id="ftcC">${CATS.map((c) => `<option>${c}</option>`).join("")}</select></div>
+            <div class="field"><label for="ftcQ">Qty</label><input id="ftcQ" class="input" type="number" min="0.01" step="0.01" value="1"/></div>
+            <div class="field"><label for="ftcU">Unit Cost ($)</label><input id="ftcU" class="input" type="number" min="0" step="0.01" placeholder="0.00"/></div>
             <div class="field addCostBtn"><label style="visibility:hidden">a</label><button type="button" class="btn primary" id="btnTAC">+ Add</button></div>
           </div>
         </div>
       </div>
       <div class="modalFt">
-        <button type="button" class="btn" id="ftCancel">Cancelar</button>
-        <button type="button" class="btn primary" id="ftSave">${isEdit ? "Salvar" : "Criar Template"}</button>
+        <button type="button" class="btn" id="ftCancel">Cancel</button>
+        <button type="button" class="btn primary" id="ftSave">${isEdit ? "Save" : "Create Template"}</button>
       </div>`);
 
     const rebind = () => {
@@ -1521,14 +1618,14 @@
           if (i !== -1) state.templates[i] = saved;
           else state.templates.push(saved);
           toast.success(
-            isEdit ? "Template atualizado" : "Template criado",
+            isEdit ? "Template updated" : "Template created",
             saved.name,
           );
           modal.close();
           render();
         })
         .catch(() =>
-          toast.error("Erro ao salvar", "Não foi possível salvar template."),
+          toast.error("Save error", "Could not save template."),
         );
     });
   }
@@ -1563,44 +1660,44 @@
       <div class="kpiGrid">
         <div class="card cardBody kpi">
           <div class="kpiVal">${state.jobs.length}</div>
-          <div class="kpiLbl">Total de Jobs</div>
+          <div class="kpiLbl">Total Jobs</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal" style="color:var(--primary)">${active}</div>
-          <div class="kpiLbl">Ativos</div>
+          <div class="kpiLbl">Active</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal" style="color:var(--ok)">${completed}</div>
-          <div class="kpiLbl">Concluídos</div>
+          <div class="kpiLbl">Completed</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal" style="color:var(--purple)">${invoiced}</div>
-          <div class="kpiLbl">Faturados</div>
+          <div class="kpiLbl">Invoiced</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal kpiValSm">${fmt(totalVal)}</div>
-          <div class="kpiLbl">Valor Total Estimado</div>
+          <div class="kpiLbl">Total Est. Value</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal kpiValSm">${fmt(totalCosts)}</div>
-          <div class="kpiLbl">Total de Custos</div>
+          <div class="kpiLbl">Total Costs</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal kpiValSm" style="color:${totalMargin >= 0 ? "var(--ok)" : "var(--danger)"}">
             ${fmt(totalMargin)}
           </div>
-          <div class="kpiLbl">Margem Total</div>
+          <div class="kpiLbl">Total Margin</div>
         </div>
         <div class="card cardBody kpi">
           <div class="kpiVal">${totalHrs.toFixed(1)}h</div>
-          <div class="kpiLbl">Horas Registradas</div>
+          <div class="kpiLbl">Hours Logged</div>
         </div>
       </div>
       ${
         overdueJobs.length
           ? `
       <div class="alertBanner">
-        ⚠ ${overdueJobs.length} job(s) com prazo vencido:
+        ⚠ ${overdueJobs.length} job(s) with overdue deadline:
         ${overdueJobs
           .slice(0, 3)
           .map((j) => `<strong>${esc(j.name)}</strong>`)
@@ -1611,12 +1708,12 @@
       }
       <div class="card" style="margin-top:14px;">
         <div class="cardHeader">
-          <div class="cardTitle">${state.search ? `Resultados: "${esc(state.search)}"` : "Jobs Recentes"}</div>
-          <button class="btn primary admin-only" id="btnDN">+ Novo Job</button>
+          <div class="cardTitle">${state.search ? `Results: "${esc(state.search)}"` : "Recent Jobs"}</div>
+          <button class="btn primary admin-only" id="btnDN">+ New Job</button>
         </div>
         ${
           list.length === 0
-            ? `<div class="empty" style="margin:14px;">${state.search ? "Nenhum job encontrado." : "Nenhum job criado ainda."}</div>`
+            ? `<div class="empty" style="margin:14px;">${state.search ? "No jobs found." : "No jobs created yet."}</div>`
             : list
                 .map((j) => {
                   const tc = jobCost(j);
@@ -1630,7 +1727,7 @@
                 <div class="jobRowMain">
                   <strong>${esc(j.name)}</strong>
                   ${j.client ? `<span class="jobRowClient"> · ${esc(j.client)}</span>` : ""}
-                  ${j.deadline ? `<span class="jobRowDeadline${overdue ? " overdue" : ""}">Prazo: ${fmtDate(j.deadline)}</span>` : ""}
+                  ${j.deadline ? `<span class="jobRowDeadline${overdue ? " overdue" : ""}">Due: ${fmtDate(j.deadline)}</span>` : ""}
                 </div>
                 <div class="jobRowMeta">
                   <span class="badge status-${j.status.toLowerCase()}">${j.status}</span>
@@ -1705,10 +1802,10 @@
           <td>${fmtDate(j.date)}</td>
           <td>
             <div style="display:flex;gap:5px;flex-wrap:wrap;">
-              <button class="btn" data-detail="${j.id}" style="padding:5px 9px;font-size:12px;">Ver</button>
-              <button class="btn admin-only" data-dup="${j.id}" style="padding:5px 9px;font-size:12px;">Copiar</button>
-              <button class="btn admin-only" data-edit="${j.id}" style="padding:5px 9px;font-size:12px;">Editar</button>
-              <button class="btn danger admin-only" data-del="${j.id}" style="padding:5px 9px;font-size:12px;">Excluir</button>
+              <button class="btn" data-detail="${j.id}" style="padding:5px 9px;font-size:12px;">View</button>
+              <button class="btn admin-only" data-dup="${j.id}" style="padding:5px 9px;font-size:12px;">Copy</button>
+              <button class="btn admin-only" data-edit="${j.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+              <button class="btn danger admin-only" data-del="${j.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
             </div>
           </td>
         </tr>`;
@@ -1717,40 +1814,40 @@
 
     root.innerHTML = `
       <div class="pageHeader">
-        <h2 class="pageTitle">Pipeline de Jobs <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
+        <h2 class="pageTitle">Job Pipeline <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button class="btn admin-only" id="btnExportAllPDF">Relatório PDF</button>
-          <button class="btn primary admin-only" id="btnNJ">+ Novo Job</button>
+          <button class="btn admin-only" id="btnExportAllPDF">Full Report PDF</button>
+          <button class="btn primary admin-only" id="btnNJ">+ New Job</button>
         </div>
       </div>
       <div class="filterBar">
         ${STATUSES.map(
           (s) => `
           <button type="button" class="filterPill${state.filter === s ? " active" : ""}" data-fv="${s}">
-            ${s === "all" ? "Todos" : s}
+            ${s === "all" ? "All" : s}
           </button>`,
         ).join("")}
         <div class="dateFilterWrap">
           <input type="date" class="input dateFilterIn" id="dfFrom" value="${state.dateFilter.from ? fmtDateInput(state.dateFilter.from) : ""}" title="De" placeholder="De"/>
-          <span class="muted" style="font-size:12px;">até</span>
+          <span class="muted" style="font-size:12px;">to</span>
           <input type="date" class="input dateFilterIn" id="dfTo" value="${state.dateFilter.to ? fmtDateInput(state.dateFilter.to) : ""}" title="Até" placeholder="Até"/>
           ${state.dateFilter.from || state.dateFilter.to ? `<button class="btn" id="btnClearDate" style="padding:4px 10px;font-size:12px;">✕</button>` : ""}
         </div>
       </div>
       ${
         list.length === 0
-          ? `<div class="empty">${state.search || state.filter !== "all" || state.dateFilter.from || state.dateFilter.to ? "Nenhum job encontrado com os filtros aplicados." : "Nenhum job criado ainda."}</div>`
+          ? `<div class="empty">${state.search || state.filter !== "all" || state.dateFilter.from || state.dateFilter.to ? "No jobs found with the applied filters." : "No jobs created yet."}</div>`
           : `<div class="tableWrap">
             <table class="table">
               <thead><tr>
                 ${th("name", "Job")}
                 ${th("status", "Status")}
-                ${th("value", "Valor Est.", "right")}
-                <th style="text-align:right;">Custo</th>
-                <th style="text-align:right;">Margem</th>
-                ${th("deadline", "Prazo")}
-                ${th("date", "Criado")}
-                <th>Ações</th>
+                ${th("value", "Est. Value", "right")}
+                <th style="text-align:right;">Cost</th>
+                <th style="text-align:right;">Margin</th>
+                ${th("deadline", "Deadline")}
+                ${th("date", "Created")}
+                <th>Actions</th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -1826,15 +1923,15 @@
         e.stopPropagation();
         const j = state.jobs.find((x) => x.id === btn.dataset.del);
         if (!j) return;
-        confirm("Excluir Job", j.name, "Excluir", () => {
+        confirm("Delete Job", j.name, "Delete", () => {
           idb
             .del(APP.stores.jobs, j.id)
             .then(() => {
               state.jobs = state.jobs.filter((x) => x.id !== j.id);
-              toast.warn("Job excluído", j.name);
+              toast.warn("Job deleted", j.name);
               render();
             })
-            .catch(() => toast.error("Erro", "Não foi possível excluir."));
+            .catch(() => toast.error("Error", "Could not delete job."));
         });
       }),
     );
@@ -1845,12 +1942,12 @@
     root.innerHTML = `
       <div class="pageHeader">
         <h2 class="pageTitle">Templates <span class="muted" style="font-size:14px;font-weight:400;">(${state.templates.length})</span></h2>
-        <button class="btn primary admin-only" id="btnNT">+ Novo Template</button>
+        <button class="btn primary admin-only" id="btnNT">+ New Template</button>
       </div>
-      <p class="help" style="margin-bottom:16px;">Templates pré-preenchem itens de custo quando você cria um novo job.</p>
+      <p class="help" style="margin-bottom:16px;">Templates pre-fill cost items when you create a new job.</p>
       ${
         state.templates.length === 0
-          ? `<div class="empty">Nenhum template criado ainda.</div>`
+          ? `<div class="empty">No templates created yet.</div>`
           : `<div class="cardList">
             ${state.templates
               .map(
@@ -1862,12 +1959,12 @@
                     ${t.description ? `<div class="cardSub" style="margin-top:4px;">${esc(t.description)}</div>` : ""}
                     <div class="muted" style="font-size:12px;margin-top:6px;">
                       ${(t.costs || []).length} item(s) ·
-                      Total estimado: <strong>${fmt((t.costs || []).reduce((s, c) => s + (c.qty || 0) * (c.unitCost || 0), 0))}</strong>
+                      Est. total: <strong>${fmt((t.costs || []).reduce((s, c) => s + (c.qty || 0) * (c.unitCost || 0), 0))}</strong>
                     </div>
                   </div>
                   <div style="display:flex;gap:8px;flex-shrink:0;">
-                    <button class="btn admin-only" data-et="${t.id}">Editar</button>
-                    <button class="btn danger admin-only" data-dt="${t.id}">Excluir</button>
+                    <button class="btn admin-only" data-et="${t.id}">Edit</button>
+                    <button class="btn danger admin-only" data-dt="${t.id}">Delete</button>
                   </div>
                 </div>
               </div>`,
@@ -1889,15 +1986,15 @@
       btn.addEventListener("click", () => {
         const t = state.templates.find((x) => x.id === btn.dataset.dt);
         if (!t) return;
-        confirm("Excluir Template", t.name, "Excluir", () => {
+        confirm("Delete Template", t.name, "Delete", () => {
           idb
             .del(APP.stores.templates, t.id)
             .then(() => {
               state.templates = state.templates.filter((x) => x.id !== t.id);
-              toast.warn("Template excluído", t.name);
+              toast.warn("Template deleted", t.name);
               render();
             })
-            .catch(() => toast.error("Erro", "Não foi possível excluir."));
+            .catch(() => toast.error("Error", "Could not delete template."));
         });
       });
     });
@@ -1914,7 +2011,7 @@
               `<option value="${j.id}" ${state.fieldSession.data?.jobId === j.id ? "selected" : ""}>${esc(j.name)}</option>`,
           )
           .join("")
-      : `<option value="">Nenhum job disponível</option>`;
+      : `<option value="">No jobs available</option>`;
 
     const recentLogs = [...state.timeLogs]
       .sort((a, b) => b.date - a.date)
@@ -1927,10 +2024,10 @@
     root.innerHTML = `
       <div class="fieldLayout">
         <div class="card fieldAppWrapper">
-          <h2 style="margin:0;font-size:18px;">Registro de Tempo</h2>
+          <h2 style="margin:0;font-size:18px;">Time Tracking</h2>
           ${
             !jobList.length
-              ? `<div class="empty" style="max-width:320px;">Nenhum job disponível. Peça ao administrador para criar jobs com status "Active".</div>`
+              ? `<div class="empty" style="max-width:320px;">No jobs available. Ask an admin to create jobs with "Active" status.</div>`
               : `
               <div style="width:100%;max-width:360px;">
                 <label for="fieldJobSel" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Job</label>
@@ -1944,19 +2041,19 @@
                   ? `
               <div class="timerDisplay">
                 <span id="liveTimer">${elapsed}</span>
-                <span class="timerLabel">em andamento desde ${new Date(state.fieldSession.data.timeIn).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span class="timerLabel">in progress since ${new Date(state.fieldSession.data.timeIn).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
               </div>
               <div style="width:100%;max-width:360px;">
-                <label for="clockNote" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Observação ao fechar (opcional)</label>
-                <input id="clockNote" class="input" type="text" maxlength="200" placeholder="O que foi feito nesta sessão…"/>
+                <label for="clockNote" style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;">Note when clocking out (optional)</label>
+                <input id="clockNote" class="input" type="text" maxlength="200" placeholder="What was done this session…"/>
               </div>`
                   : ""
               }
               <div id="geoDisplay" class="geoData">
                 ${
                   state.fieldSession.active
-                    ? `📍 ${state.fieldSession.data.lat?.toFixed(5) ?? "?"}, ${state.fieldSession.data.lng?.toFixed(5) ?? "?"}`
-                    : "Pronto para registrar."
+                    ? `📍 ${state.fieldSession.data.address || `${state.fieldSession.data.lat?.toFixed(5) ?? "?"}, ${state.fieldSession.data.lng?.toFixed(5) ?? "?"}`}`
+                    : "Ready to log."
                 }
               </div>`
           }
@@ -1965,10 +2062,10 @@
           recentLogs.length
             ? `
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Registros Recentes</div></div>
+          <div class="cardHeader"><div class="cardTitle">Recent Logs</div></div>
           <div class="tableWrap">
             <table class="table">
-              <thead><tr><th>Job</th><th>Data</th><th style="text-align:right;">Horas</th><th>Obs.</th></tr></thead>
+              <thead><tr><th>Job</th><th>Date</th><th style="text-align:right;">Hours</th><th>Note</th></tr></thead>
               <tbody>
                 ${recentLogs
                   .map((l) => {
@@ -2010,24 +2107,30 @@
       const geo = $("#geoDisplay", root);
       if (!state.fieldSession.active) {
         /* Clock in */
-        geo.textContent = "Obtendo localização GPS…";
+        geo.textContent = "Getting GPS location…";
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             state.fieldSession.active = true;
             state.fieldSession.data = {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
+              address: null,
               timeIn: Date.now(),
               jobId: $("#fieldJobSel", root).value,
             };
-            /* Start timer */
             if (state.liveTimer) clearInterval(state.liveTimer);
             state.liveTimer = null;
             renderFieldApp(root);
             toast.info(
-              "Clock In registrado",
+              "Clocked In",
               `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
             );
+            /* Reverse geocode in background */
+            reverseGeocode(pos.coords.latitude, pos.coords.longitude, (addr) => {
+              if (state.fieldSession.data) state.fieldSession.data.address = addr;
+              const geoEl = document.getElementById("geoDisplay");
+              if (geoEl) geoEl.textContent = `📍 ${addr}`;
+            });
           },
           () => {
             /* GPS denied — clock in without coordinates */
@@ -2035,6 +2138,7 @@
             state.fieldSession.data = {
               lat: null,
               lng: null,
+              address: null,
               timeIn: Date.now(),
               jobId: $("#fieldJobSel", root).value,
             };
@@ -2042,8 +2146,8 @@
             state.liveTimer = null;
             renderFieldApp(root);
             toast.warn(
-              "GPS não disponível",
-              "Sessão iniciada sem coordenadas.",
+              "GPS unavailable",
+              "Session started without coordinates.",
             );
           },
           { timeout: 8000 },
@@ -2068,13 +2172,13 @@
             state.fieldSession.active = false;
             state.fieldSession.data = null;
             toast.success(
-              "Sessão salva",
-              `${hrs.toFixed(2)} horas registradas.`,
+              "Session saved",
+              `${hrs.toFixed(2)} hours logged.`,
             );
             renderFieldApp(root);
           })
           .catch(() =>
-            toast.error("Erro", "Não foi possível salvar o registro."),
+            toast.error("Error", "Could not save time log."),
           );
       }
     });
@@ -2103,18 +2207,18 @@
       <h2 class="pageTitle" style="margin-bottom:18px;">Analytics</h2>
       <div class="biGrid">
         <div class="chartWrap">
-          <h3>Jobs por Status</h3>
-          ${hasJobs ? `<canvas id="chartStatus"></canvas>` : `<div class="empty">Nenhum job criado ainda.</div>`}
+          <h3>Jobs by Status</h3>
+          ${hasJobs ? `<canvas id="chartStatus"></canvas>` : `<div class="empty">No jobs created yet.</div>`}
         </div>
         <div class="chartWrap">
-          <h3>Horas por Job</h3>
-          ${hasLogs ? `<canvas id="chartTime"></canvas>` : `<div class="empty">Sem registros de horas ainda.</div>`}
+          <h3>Hours by Job</h3>
+          ${hasLogs ? `<canvas id="chartTime"></canvas>` : `<div class="empty">No time logs yet.</div>`}
         </div>
         ${
           hasCosts
             ? `
         <div class="chartWrap" style="grid-column:1/-1;">
-          <h3>Custo Total vs. Valor Estimado</h3>
+          <h3>Total Cost vs. Estimated Value</h3>
           <canvas id="chartCosts"></canvas>
         </div>`
             : ""
@@ -2123,7 +2227,7 @@
           hasHoursEst
             ? `
         <div class="chartWrap" style="grid-column:1/-1;">
-          <h3>Horas Estimadas vs. Reais por Job</h3>
+          <h3>Estimated vs. Actual Hours by Job</h3>
           <canvas id="chartHours"></canvas>
         </div>`
             : ""
@@ -2175,7 +2279,7 @@
         const data = {};
         Object.entries(hrsByJob).forEach(([id, hrs]) => {
           const j = state.jobs.find((x) => x.id === id);
-          data[j ? j.name.slice(0, 20) : "Desconhecido"] = +hrs.toFixed(2);
+          data[j ? j.name.slice(0, 20) : "Unknown"] = +hrs.toFixed(2);
         });
         new Chart($("#chartTime"), {
           type: "bar",
@@ -2183,7 +2287,7 @@
             labels: Object.keys(data),
             datasets: [
               {
-                label: "Horas",
+                label: "Hours",
                 data: Object.values(data),
                 backgroundColor: "rgba(122,162,255,.75)",
                 borderRadius: 6,
@@ -2204,13 +2308,13 @@
             labels: topJobs.map((j) => j.name.slice(0, 20)),
             datasets: [
               {
-                label: "Custo Total",
+                label: "Total Cost",
                 data: topJobs.map((j) => jobCost(j)),
                 backgroundColor: "rgba(255,90,122,.75)",
                 borderRadius: 5,
               },
               {
-                label: "Valor Estimado",
+                label: "Estimated Value",
                 data: topJobs.map((j) => j.value || 0),
                 backgroundColor: "rgba(122,162,255,.75)",
                 borderRadius: 5,
@@ -2234,13 +2338,13 @@
             labels: jobsWithEst.map((j) => j.name.slice(0, 20)),
             datasets: [
               {
-                label: "Horas Estimadas",
+                label: "Estimated Hours",
                 data: jobsWithEst.map((j) => j.estimatedHours),
                 backgroundColor: "rgba(122,162,255,.65)",
                 borderRadius: 5,
               },
               {
-                label: "Horas Reais",
+                label: "Actual Hours",
                 data: jobsWithEst.map((j) =>
                   state.timeLogs
                     .filter((l) => l.jobId === j.id)
@@ -2267,63 +2371,63 @@
     root.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:14px;max-width:560px;">
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Acesso e Perfil</div></div>
+          <div class="cardHeader"><div class="cardTitle">Access & Profile</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
             <div class="field">
-              <label for="selRole">Nível de Acesso</label>
+              <label for="selRole">Access Level</label>
               <select id="selRole">
-                <option value="admin" ${state.settings.role === "admin" ? "selected" : ""}>Administrador — acesso total</option>
-                <option value="field" ${state.settings.role === "field" ? "selected" : ""}>Trabalhador de Campo — apenas Dashboard e Campo</option>
+                <option value="admin" ${state.settings.role === "admin" ? "selected" : ""}>Administrator — full access</option>
+                <option value="field" ${state.settings.role === "field" ? "selected" : ""}>Field Worker — Dashboard & Field only</option>
               </select>
             </div>
             <div class="field">
-              <label for="selCompany">Nome da Empresa</label>
+              <label for="selCompany">Company Name</label>
               <input id="selCompany" class="input" type="text" maxlength="100"
-                placeholder="Aparece nos PDFs exportados"
+                placeholder="Appears on exported PDFs"
                 value="${esc(state.settings.company || "")}"/>
             </div>
-            <button class="btn primary" id="btnSave">Salvar Configurações</button>
+            <button class="btn primary" id="btnSave">Save Settings</button>
           </div>
         </div>
 
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Exportar Relatórios</div></div>
+          <div class="cardHeader"><div class="cardTitle">Export Reports</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
             <div class="row" style="flex-wrap:wrap;">
               <button class="btn" id="btnSExp">
                 <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 3v10M8 9l4 4 4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Backup JSON
+                JSON Backup
               </button>
               <button class="btn" id="btnAllPDF">
                 <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M7 7h10M7 12h10M7 17h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6"/></svg>
-                Relatório Geral PDF
+                Full Report PDF
               </button>
               <button class="btn" id="btnSImp">
                 <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 21V11M8 15l4-4 4 4M5 3h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Importar Backup
+                Import Backup
               </button>
               <input type="file" id="fileImport" accept=".json" style="display:none;"/>
             </div>
-            <p class="help">O backup JSON inclui jobs, horas e templates. A importação mescla os dados sem apagar registros existentes.</p>
+            <p class="help">JSON backup includes jobs, hours, and templates. Import merges data without deleting existing records.</p>
           </div>
         </div>
 
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Zona de Perigo</div></div>
+          <div class="cardHeader"><div class="cardTitle">Danger Zone</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
-            <button class="btn danger" id="btnClear">Limpar Todos os Dados</button>
-            <p class="help" style="color:var(--danger);">Remove permanentemente todos os jobs, horas e templates. Exporte um backup antes!</p>
+            <button class="btn danger" id="btnClear">Clear All Data</button>
+            <p class="help" style="color:var(--danger);">Permanently removes all jobs, hours, and templates. Export a backup first!</p>
           </div>
         </div>
 
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Sobre o App</div></div>
+          <div class="cardHeader"><div class="cardTitle">About</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:6px;">
             <div><strong>JobCost Pro</strong> <span class="muted">v2.0</span></div>
-            <div class="muted">Offline-first · Sem backend · Dados 100% locais (IndexedDB)</div>
+            <div class="muted">Offline-first · No backend · 100% local data (IndexedDB)</div>
             <div class="hr"></div>
-            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} registros de horas · ${state.templates.length} templates</div>
-            <div class="small">Atalhos: <code class="kbd">Ctrl+K</code> busca · <code class="kbd">Ctrl+N</code> novo job · <code class="kbd">Esc</code> fechar modal</div>
+            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.templates.length} templates</div>
+            <div class="small">Shortcuts: <code class="kbd">Ctrl+K</code> search · <code class="kbd">Ctrl+N</code> new job · <code class="kbd">Esc</code> close modal</div>
           </div>
         </div>
       </div>`;
@@ -2336,7 +2440,7 @@
       if (state.settings.role === "field") {
         routeTo("field");
       } else {
-        toast.success("Configurações salvas", "Preferências atualizadas.");
+        toast.success("Settings saved", "Preferences updated.");
       }
     });
 
@@ -2356,7 +2460,7 @@
         try {
           const data = JSON.parse(ev.target.result);
           if (!Array.isArray(data.jobs)) {
-            toast.error("Importação falhou", "Formato de arquivo inválido.");
+            toast.error("Import failed", "Invalid file format.");
             return;
           }
           Promise.all([
@@ -2380,18 +2484,18 @@
               state.timeLogs = tl;
               state.templates = tpls;
               toast.success(
-                "Importação concluída",
-                `${data.jobs.length} jobs importados.`,
+                "Import complete",
+                `${data.jobs.length} jobs imported.`,
               );
               render();
             })
             .catch(() =>
-              toast.error("Erro", "Falha ao salvar dados importados."),
+              toast.error("Error", "Failed to save imported data."),
             );
         } catch {
           toast.error(
-            "Importação falhou",
-            "Não foi possível ler o arquivo JSON.",
+            "Import failed",
+            "Could not read the JSON file.",
           );
         }
       };
@@ -2400,9 +2504,9 @@
 
     root.querySelector("#btnClear")?.addEventListener("click", () => {
       confirm(
-        "Limpar Todos os Dados",
-        "Isso excluirá TODOS os jobs, registros de horas e templates.",
-        "Limpar Tudo",
+        "Clear All Data",
+        "This will permanently delete ALL jobs, time logs, and templates.",
+        "Clear All",
         () => {
           Promise.all(
             Object.values(APP.stores).map((s) =>
@@ -2417,10 +2521,10 @@
               state.jobs = [];
               state.timeLogs = [];
               state.templates = [];
-              toast.warn("Dados removidos", "Todos os dados foram excluídos.");
+              toast.warn("Data cleared", "All data has been deleted.");
               render();
             })
-            .catch(() => toast.error("Erro", "Falha ao limpar dados."));
+            .catch(() => toast.error("Error", "Failed to clear data."));
         },
       );
     });
@@ -2428,3 +2532,4 @@
 
   init();
 })();
+

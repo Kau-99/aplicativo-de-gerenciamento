@@ -1,13 +1,13 @@
 {
   "name": "JobCost Pro",
   "short_name": "JobCost",
-  "description": "Gestão de jobs offline. Sem backend, sem nuvem.",
+  "description": "Offline job cost management. No backend, no cloud.",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#0b0f17",
   "theme_color": "#0b0f17",
-  "lang": "pt-BR",
+  "lang": "en-US",
   "icons": [
     {
       "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='38' fill='%23121a2b'/%3E%3Cpath d='M48 75C48 61 59 50 73 50h46C133 50 144 61 144 75v42c0 14-11 25-25 25H73c-14 0-25-11-25-25V75Z' stroke='%237aa2ff' stroke-width='7' fill='none'/%3E%3Cpath d='M70 78h52M70 96h36M70 114h44' stroke='%237aa2ff' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E",
