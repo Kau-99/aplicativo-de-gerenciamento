@@ -1,0 +1,27 @@
+{
+  "name": "JobCost Pro",
+  "short_name": "JobCost",
+  "description": "Gestão de jobs offline. Sem backend, sem nuvem.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0f17",
+  "theme_color": "#0b0f17",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='38' fill='%23121a2b'/%3E%3Cpath d='M48 75C48 61 59 50 73 50h46C133 50 144 61 144 75v42c0 14-11 25-25 25H73c-14 0-25-11-25-25V75Z' stroke='%237aa2ff' stroke-width='7' fill='none'/%3E%3Cpath d='M70 78h52M70 96h36M70 114h44' stroke='%237aa2ff' stroke-width='7' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%23121a2b'/%3E%3Cpath d='M128 200C128 163 158 133 195 133h122C354 133 384 163 384 200v112c0 37-30 67-67 67H195c-37 0-67-30-67-67V200Z' stroke='%237aa2ff' stroke-width='18' fill='none'/%3E%3Cpath d='M186 208h140M186 256h96M186 304h116' stroke='%237aa2ff' stroke-width='18' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "screenshots": []
+}
