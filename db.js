@@ -4,7 +4,7 @@ export function createIDB(APP) {
   const wrap = (r) =>
     new Promise((res, rej) => {
       r.onsuccess = () => res(r.result);
-      r.onerror  = () => rej(r.error);
+      r.onerror = () => rej(r.error);
     });
 
   return {
@@ -18,13 +18,14 @@ export function createIDB(APP) {
               d.createObjectStore(s, { keyPath: "id" });
           });
         };
-        r.onsuccess = () => { db = r.result; resolve(db); };
-        r.onerror   = () => reject(r.error);
+        r.onsuccess = () => {
+          db = r.result;
+          resolve(db);
+        };
+        r.onerror = () => reject(r.error);
       }),
-    getAll: (s) =>
-      wrap(db.transaction(s, "readonly").objectStore(s).getAll()),
-    put: (s, v) =>
-      wrap(db.transaction(s, "readwrite").objectStore(s).put(v)),
+    getAll: (s) => wrap(db.transaction(s, "readonly").objectStore(s).getAll()),
+    put: (s, v) => wrap(db.transaction(s, "readwrite").objectStore(s).put(v)),
     del: (s, id) =>
       wrap(db.transaction(s, "readwrite").objectStore(s).delete(id)),
   };

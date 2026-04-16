@@ -3,7 +3,8 @@ export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 
 /* ─── Generators ─────────────────────────────────────────── */
-export const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+export const uid = () =>
+  `id_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
 /* ─── String / HTML ──────────────────────────────────────── */
 export const esc = (v) =>
@@ -15,9 +16,13 @@ export const esc = (v) =>
 
 /* ─── Number / Date formatters ───────────────────────────── */
 export const fmt = (n) =>
-  Number(n || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  Number(n || 0).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
 
-export const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString("en-US") : "—");
+export const fmtDate = (ts) =>
+  ts ? new Date(ts).toLocaleDateString("en-US") : "—";
 
 export const fmtDateInput = (ts) => {
   if (!ts) return "";
