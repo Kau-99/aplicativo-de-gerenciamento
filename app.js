@@ -38,6 +38,7 @@ const state = {
     invoiceCounter: 1,
     estimateCounter: 1,
     defaultMarkup: 0,
+    minMargin: 30,
     mileageRate: 0.67,
     mpg: 15,
     gasPrice: 3.5,
@@ -110,6 +111,7 @@ function attachVoiceToAll(container) {
     btn.title = "Speak to type";
     btn.setAttribute("aria-label", "Voice input");
 
+    const origPlaceholder = ta.placeholder;
     let recognition = null;
     let listening = false;
 
@@ -121,36 +123,34 @@ function attachVoiceToAll(container) {
       }
 
       recognition = new SR();
-      recognition.lang = state.settings.language === "es" ? "es-US" : "en-US";
-      recognition.interimResults = true;
+      recognition.lang = state.settings.language === "es"
+        ? "es-ES"
+        : navigator.language || "en-US";
+      recognition.interimResults = false;
+      recognition.continuous = false;
       recognition.maxAlternatives = 1;
-
-      let interimStart = ta.value.length;
 
       recognition.onstart = () => {
         listening = true;
         btn.classList.add("voiceMicBtn--active");
         btn.title = "Click to stop";
+        ta.placeholder = "Listening… Speak slowly";
       };
 
       recognition.onresult = (ev) => {
-        const transcript = Array.from(ev.results)
-          .map((r) => r[0].transcript)
-          .join("");
-        /* Replace interim region in textarea */
-        ta.value = ta.value.slice(0, interimStart) + transcript;
-        if (ev.results[ev.results.length - 1].isFinal) {
-          interimStart = ta.value.length;
-          ta.value += " ";
-          interimStart = ta.value.length;
+        const transcript = ev.results[0]?.[0]?.transcript ?? "";
+        if (transcript) {
+          ta.value = ta.value
+            ? ta.value.trimEnd() + " " + transcript
+            : transcript;
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
         }
-        ta.dispatchEvent(new Event("input", { bubbles: true }));
       };
 
       recognition.onerror = (ev) => {
         if (ev.error === "not-allowed") {
           toast.warn("Microphone blocked", "Allow microphone access in your browser settings.");
-        } else if (ev.error !== "aborted") {
+        } else if (ev.error !== "aborted" && ev.error !== "no-speech") {
           toast.warn("Voice error", ev.error);
         }
       };
@@ -159,6 +159,7 @@ function attachVoiceToAll(container) {
         listening = false;
         btn.classList.remove("voiceMicBtn--active");
         btn.title = "Speak to type";
+        ta.placeholder = origPlaceholder;
         recognition = null;
       };
 
@@ -2611,6 +2612,102 @@ async function saveJobChecklist(job) {
   await saveJob(job);
 }
 
+/* ─── PDF: Before & After Completion Report ─── */
+function exportBeforeAfterPDF(job) {
+  if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+  const beforePhotos = (job.photos || []).filter((p) => p.type === "before");
+  const afterPhotos  = (job.photos || []).filter((p) => p.type === "after");
+  if (!beforePhotos.length && !afterPhotos.length) {
+    toast.warn("No tagged photos", "Mark at least one photo as Before or After first.");
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const s = state.settings;
+  const lm = 14, rr = 196, pw = 182;
+  let y = 18;
+
+  /* ── Header ── */
+  doc.setFillColor(20, 40, 90);
+  doc.rect(0, 0, 210, 36, "F");
+  if (s.logoDataUrl) {
+    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28); } catch {}
+  }
+  const hx = s.logoDataUrl ? lm + 32 : lm;
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20); doc.setFont("helvetica", "bold");
+  doc.text("COMPLETION REPORT", hx, y);
+  doc.setFontSize(9); doc.setFont("helvetica", "normal");
+  if (s.company) doc.text(s.company, hx, y + 8);
+  if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, hx, y + 14);
+  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+  doc.setTextColor(0);
+  y = 44;
+
+  /* ── Job / Client info ── */
+  doc.setFontSize(11); doc.setFont("helvetica", "bold");
+  doc.text(job.name, lm, y); y += 7;
+  doc.setFontSize(9); doc.setFont("helvetica", "normal");
+  if (job.client) { doc.text(`Client: ${job.client}`, lm, y); y += 5; }
+  const addr = [job.city, job.state, job.zip].filter(Boolean).join(", ");
+  if (addr) { doc.text(`Address: ${addr}`, lm, y); y += 5; }
+  doc.setDrawColor(200, 210, 230);
+  doc.line(lm, y, rr, y); y += 6;
+
+  /* ── Helper: place one image, returns new y ── */
+  const addPhoto = (photo, label, x, imgW, imgH) => {
+    const dataUrl = photo.data || photo.dataUrl || "";
+    if (!dataUrl) return;
+    const fmt = dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+    doc.setFontSize(8); doc.setFont("helvetica", "bold");
+    doc.setTextColor(80, 80, 80);
+    doc.text(label, x + imgW / 2, y, { align: "center" });
+    try {
+      doc.addImage(dataUrl, fmt, x, y + 3, imgW, imgH);
+    } catch {}
+  };
+
+  /* ── Pair layout: Before left / After right ── */
+  const maxPairs = Math.max(beforePhotos.length, afterPhotos.length);
+  const colW = (pw - 6) / 2;     /* two columns with 6mm gutter */
+  const imgH = colW * 0.7;       /* ~70% aspect ratio */
+
+  for (let i = 0; i < maxPairs; i++) {
+    const neededH = imgH + 18;
+    if (y + neededH > 275) { doc.addPage(); y = 16; }
+
+    const bp = beforePhotos[i] || null;
+    const ap = afterPhotos[i]  || null;
+
+    if (bp) addPhoto(bp, "BEFORE", lm, colW, imgH);
+    if (ap) addPhoto(ap, "AFTER",  lm + colW + 6, colW, imgH);
+
+    /* border around each image */
+    if (bp) { doc.setDrawColor(180, 190, 210); doc.rect(lm, y + 3, colW, imgH); }
+    if (ap) { doc.setDrawColor(180, 190, 210); doc.rect(lm + colW + 6, y + 3, colW, imgH); }
+
+    y += neededH + 4;
+  }
+
+  /* ── Summary row ── */
+  if (y + 14 > 275) { doc.addPage(); y = 16; }
+  y += 4;
+  doc.setFillColor(20, 40, 90);
+  doc.rect(lm, y, pw, 10, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(9); doc.setFont("helvetica", "bold");
+  doc.text(`${beforePhotos.length} Before  ·  ${afterPhotos.length} After  ·  Status: ${job.status}`, 105, y + 7, { align: "center" });
+  doc.setTextColor(0);
+
+  /* ── Footer ── */
+  doc.setFontSize(7); doc.setTextColor(150);
+  doc.text(`${s.company || "JobCost Pro"}  ·  Generated ${fmtDate(Date.now())}`, 105, 290, { align: "center" });
+
+  doc.save(`BeforeAfter_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 35)}.pdf`);
+  toast.success("Report exported", `${beforePhotos.length} before + ${afterPhotos.length} after photos.`);
+}
+
 /* ─── Completion Certificate PDF ─────────────── */
 function exportCompletionCertPDF(job) {
   if (!window.jspdf) {
@@ -3479,6 +3576,10 @@ function openJobDetailModal(job) {
         <div class="photoThumb">
           <img src="${p.data || p.dataUrl || ""}" alt="${esc(p.name || p.caption || "Photo")}" loading="lazy" data-pid="${p.id}"/>
           ${p.caption ? `<div class="photoCaption">${esc(p.caption)}</div>` : ""}
+          <div class="photoTypeRow">
+            <button class="photoTypeBtn${p.type === "before" ? " active" : ""}" data-ptype="before" data-pid="${p.id}" title="Mark as Before">B</button>
+            <button class="photoTypeBtn${p.type === "after" ? " active" : ""}" data-ptype="after" data-pid="${p.id}" title="Mark as After">A</button>
+          </div>
           <button class="photoDelBtn" data-pid="${p.id}" aria-label="Remove photo">✕</button>
         </div>`,
         )
@@ -3691,6 +3792,7 @@ function openJobDetailModal(job) {
         <button type="button" class="btn admin-only" id="bjWorkOrder">Work Order</button>
         <button type="button" class="btn primary admin-only" id="bjPDF">Report PDF</button>
         <button type="button" class="btn admin-only" id="bjCert">Completion Cert</button>
+        <button type="button" class="btn admin-only" id="bjBAReport">Before &amp; After PDF</button>
         <button type="button" class="btn admin-only" id="bjPL">P&amp;L Report</button>
         ${["Completed", "Invoiced"].includes(job.status) ? `<button type="button" class="btn admin-only" id="bjWarranty">Warranty Cert</button>` : ""}
         ${["Completed", "Invoiced"].includes(job.status) ? `<button type="button" class="btn admin-only" id="bjReview">Request Review</button>` : ""}
@@ -3959,6 +4061,17 @@ function openJobDetailModal(job) {
       });
     });
 
+    root.querySelectorAll(".photoTypeBtn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const { pid, ptype } = btn.dataset;
+        const photo = (job.photos || []).find((p) => p.id === pid);
+        if (!photo) return;
+        photo.type = photo.type === ptype ? "" : ptype;
+        saveJob(job).then(() => switchTab("photos"));
+      });
+    });
+
     root.querySelectorAll(".photoThumb img").forEach((img) => {
       img.addEventListener("click", () => {
         const pid = img.dataset.pid;
@@ -4190,6 +4303,9 @@ function openJobDetailModal(job) {
   m.querySelector("#bjPDF").addEventListener("click", () => exportJobPDF(job));
   m.querySelector("#bjCert").addEventListener("click", () =>
     exportCompletionCertPDF(job),
+  );
+  m.querySelector("#bjBAReport").addEventListener("click", () =>
+    exportBeforeAfterPDF(job),
   );
   m.querySelector("#bjWorkOrder").addEventListener("click", () =>
     exportWorkOrderPDF(job),
@@ -4877,14 +4993,20 @@ function renderDashboard(root) {
                 .map((j) => {
                   const tc = jobCost(j);
                   const margin = (j.value || 0) - tc;
+                  const marginPct = j.value > 0 ? (margin / j.value) * 100 : 0;
+                  const minMargin = state.settings.minMargin ?? 30;
+                  const isLowMargin = j.value > 0
+                    && marginPct < minMargin
+                    && !["Lead", "Draft"].includes(j.status);
                   const overdue =
                     j.deadline &&
                     j.deadline < now &&
                     !["Completed", "Invoiced"].includes(j.status);
                   return `
-              <div class="jobRow" data-detail="${j.id}">
+              <div class="jobRow${isLowMargin ? " low-margin" : ""}" data-detail="${j.id}">
                 <div class="jobRowMain">
                   <strong>${esc(j.name)}</strong>
+                  ${isLowMargin ? `<span class="lowMarginBadge" title="Margin ${marginPct.toFixed(1)}% — below ${minMargin}% target">⚠ Low Margin</span>` : ""}
                   ${j.client ? `<span class="jobRowClient"> · ${esc(j.client)}</span>` : ""}
                   ${j.deadline ? `<span class="jobRowDeadline${overdue ? " overdue" : ""}">Due: ${fmtDate(j.deadline)}</span>` : ""}
                 </div>
@@ -5775,6 +5897,11 @@ function renderSettings(root) {
                 <p class="help" style="margin-top:4px;">Shown as target margin in job modal.</p>
               </div>
               <div class="field">
+                <label for="selMinMargin">Target Minimum Margin (%)</label>
+                <input id="selMinMargin" class="input" type="number" min="0" max="100" step="1" placeholder="30" value="${s.minMargin ?? 30}"/>
+                <p class="help" style="margin-top:4px;">Jobs below this margin show a ⚠ alert on Kanban &amp; Dashboard.</p>
+              </div>
+              <div class="field">
                 <label for="selMileage">IRS Mileage Rate ($/mile)</label>
                 <input id="selMileage" class="input" type="number" min="0" step="0.001" placeholder="0.670" value="${s.mileageRate || 0.67}"/>
                 <p class="help" style="margin-top:4px;">2024 IRS standard rate: $0.67/mile.</p>
@@ -5970,6 +6097,8 @@ function renderSettings(root) {
       root.querySelector("#selInvPrefix").value.trim() || "INV";
     state.settings.defaultMarkup =
       parseFloat(root.querySelector("#selMarkup").value) || 0;
+    state.settings.minMargin =
+      parseFloat(root.querySelector("#selMinMargin").value) ?? 30;
     state.settings.mileageRate =
       parseFloat(root.querySelector("#selMileage").value) || 0.67;
     state.settings.mpg = parseFloat(root.querySelector("#selMPG").value) || 15;
@@ -7460,13 +7589,19 @@ function renderKanban(root) {
                   ? `<div class="kanbanEmpty">Drop here</div>`
                   : jobs
                       .map((j) => {
+                        const tc = jobCost(j);
+                        const marginPct = j.value > 0 ? ((j.value - tc) / j.value) * 100 : 0;
+                        const minMargin = state.settings.minMargin ?? 30;
+                        const isLowMargin = j.value > 0
+                          && marginPct < minMargin
+                          && !["Lead", "Draft"].includes(j.status);
                         const overdue =
                           j.deadline &&
                           j.deadline < now &&
                           !["Completed", "Invoiced"].includes(j.status);
                         return `
-                    <div class="kanbanCard" draggable="true" data-kd="${j.id}" data-kdetail="${j.id}">
-                      <div class="kanbanCardTitle">${esc(j.name)}</div>
+                    <div class="kanbanCard${isLowMargin ? " low-margin" : ""}" draggable="true" data-kd="${j.id}" data-kdetail="${j.id}">
+                      <div class="kanbanCardTitle">${esc(j.name)}${isLowMargin ? ` <span class="lowMarginBadge" title="Margin ${marginPct.toFixed(1)}% — below ${minMargin}% target">⚠</span>` : ""}</div>
                       <div class="kanbanCardMeta">
                         ${j.client ? `<span>${esc(j.client)}</span>` : ""}
                         ${j.insulationType ? `<span>${esc(j.insulationType)}</span>` : ""}
