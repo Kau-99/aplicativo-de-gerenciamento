@@ -69,7 +69,6 @@ const idb = createIDB(APP);
 /* ─── Voice Input (Web Speech API) ─────────────────────── */
 function attachVoiceToAll(container) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return; /* browser doesn't support — silently skip */
 
   container.querySelectorAll("textarea:not([data-no-voice])").forEach((ta) => {
     /* avoid double-attaching if modal is re-rendered */
@@ -81,18 +80,34 @@ function attachVoiceToAll(container) {
     ta.parentNode.insertBefore(wrap, ta);
     wrap.appendChild(ta);
 
-    /* Mic button */
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "voiceMicBtn";
-    btn.title = "Speak to type";
-    btn.setAttribute("aria-label", "Voice input");
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+    const micSVG = `<svg viewBox="0 0 24 24" fill="none" width="16" height="16">
         <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.7"/>
         <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
         <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
       </svg>`;
+
+    /* Mic button */
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "voiceMicBtn";
+    btn.innerHTML = micSVG;
     wrap.appendChild(btn);
+
+    if (!SR) {
+      btn.disabled = true;
+      btn.classList.add("voiceMicBtn--disabled");
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      btn.title = isIOS
+        ? "Voice input not supported on iOS Safari. Use Chrome on Android."
+        : location.protocol !== "https:" && location.hostname !== "localhost"
+          ? "Voice input requires HTTPS. Host the app on a secure URL."
+          : "Voice input not supported in this browser.";
+      btn.setAttribute("aria-label", "Voice input unavailable");
+      return;
+    }
+
+    btn.title = "Speak to type";
+    btn.setAttribute("aria-label", "Voice input");
 
     let recognition = null;
     let listening = false;
@@ -132,7 +147,11 @@ function attachVoiceToAll(container) {
       };
 
       recognition.onerror = (ev) => {
-        if (ev.error !== "aborted") toast.warn("Voice error", ev.error);
+        if (ev.error === "not-allowed") {
+          toast.warn("Microphone blocked", "Allow microphone access in your browser settings.");
+        } else if (ev.error !== "aborted") {
+          toast.warn("Voice error", ev.error);
+        }
       };
 
       recognition.onend = () => {
@@ -4926,6 +4945,19 @@ function renderFieldApp(root) {
     const geo = $("#geoDisplay", root);
     if (!state.fieldSession.active) {
       /* Clock in */
+      if (!navigator.geolocation) {
+        const reason = location.protocol !== "https:" && location.hostname !== "localhost"
+          ? "GPS requires HTTPS. Host the app on a secure URL (e.g. GitHub Pages)."
+          : "GPS not available in this browser.";
+        geo.textContent = reason;
+        toast.warn("GPS unavailable", reason);
+        state.fieldSession.active = true;
+        state.fieldSession.data = { lat: null, lng: null, address: null, timeIn: Date.now(), jobId: $("#fieldJobSel", root).value };
+        if (state.liveTimer) clearInterval(state.liveTimer);
+        state.liveTimer = null;
+        renderFieldApp(root);
+        return;
+      }
       geo.textContent = "Getting GPS location…";
       navigator.geolocation.getCurrentPosition(
         (pos) => {

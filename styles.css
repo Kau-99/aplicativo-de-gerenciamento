@@ -2321,6 +2321,12 @@ a.link:hover {
   animation: micPulse 1s ease-in-out infinite;
 }
 
+.voiceMicBtn--disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+
 @keyframes micPulse {
 
   0%,
