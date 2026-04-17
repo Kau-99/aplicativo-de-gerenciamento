@@ -54,6 +54,7 @@ const state = {
     googleReviewUrl: "",
   }).load(),
   mileageLogs: [],
+  equipment: [],
   fieldSession: { active: false, data: null },
   search: "",
   sort: { col: "date", dir: "desc" },
@@ -193,11 +194,39 @@ const toast = (() => {
     c.appendChild(el);
     if (ms > 0) setTimeout(kill, ms);
   }
+  function showAction(type, title, msg, btnLabel, onBtn) {
+    const c = $("#toasts");
+    if (c.children.length >= 4) c.firstChild.remove();
+    const el = document.createElement("div");
+    el.className = `toast ${type}`;
+    el.innerHTML = `
+        <div class="dot"></div>
+        <div class="tMain">
+          <div class="tTitle">${esc(title)}</div>
+          ${msg ? `<div class="tMsg">${esc(msg)}</div>` : ""}
+          <button type="button" class="btn primary" style="margin-top:8px;font-size:12px;padding:4px 12px;">${esc(btnLabel)}</button>
+        </div>
+        <button type="button" class="tX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>`;
+    const kill = () => {
+      el.style.opacity = "0";
+      el.style.transform = "translateY(8px)";
+      setTimeout(() => el.remove(), 200);
+    };
+    el.querySelector(".tX").addEventListener("click", kill);
+    el.querySelector(".btn").addEventListener("click", () => { kill(); onBtn(); });
+    c.appendChild(el);
+    /* ms=0 → persists until dismissed */
+  }
   return {
     success: (t, m) => show("success", t, m),
     error: (t, m) => show("error", t, m),
     warn: (t, m) => show("warn", t, m),
     info: (t, m) => show("info", t, m),
+    action: (t, m, lbl, fn) => showAction("info", t, m, lbl, fn),
   };
 })();
 
@@ -281,6 +310,7 @@ async function init() {
       state.inventory,
       state.estimates,
       state.mileageLogs,
+      state.equipment,
     ] = await Promise.all([
       idb.getAll(APP.stores.jobs),
       idb.getAll(APP.stores.timeLogs),
@@ -290,6 +320,7 @@ async function init() {
       idb.getAll(APP.stores.inventory),
       idb.getAll(APP.stores.estimates),
       idb.getAll(APP.stores.mileageLogs),
+      idb.getAll(APP.stores.equipment),
     ]);
     bindUI();
     /* QR clock-in deep link: ?clockin=JOB_ID */
@@ -326,9 +357,33 @@ async function init() {
 }
 
 function registerSW() {
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  }
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("sw.js").then((reg) => {
+    /* Listen for a new SW found after the page is already controlled */
+    reg.addEventListener("updatefound", () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener("statechange", () => {
+        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+          /* A new version is waiting — prompt the user */
+          toast.action(
+            "Update available",
+            "A new version of the app is ready.",
+            "Reload now",
+            () => {
+              reg.waiting?.postMessage({ action: "skipWaiting" });
+            },
+          );
+        }
+      });
+    });
+  }).catch(() => {});
+
+  /* Reload once the new SW takes control */
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!refreshing) { refreshing = true; window.location.reload(); }
+  });
 }
 
 function checkDeadlines() {
@@ -553,6 +608,7 @@ function doExport() {
     crew: state.crew,
     inventory: state.inventory,
     mileageLogs: state.mileageLogs,
+    equipment: state.equipment,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: "application/json",
@@ -722,6 +778,13 @@ async function saveInventoryItem(item) {
   const i = state.inventory.findIndex((x) => x.id === item.id);
   if (i !== -1) state.inventory[i] = item;
   else state.inventory.push(item);
+}
+
+async function saveEquipment(item) {
+  await idb.put(APP.stores.equipment, item);
+  const i = state.equipment.findIndex((x) => x.id === item.id);
+  if (i !== -1) state.equipment[i] = item;
+  else state.equipment.push(item);
 }
 
 /* ─── Push Notification helper ───────────────── */
@@ -3140,6 +3203,10 @@ function openJobDetailModal(job) {
       .filter((l) => l.jobId === job.id)
       .sort((a, b) => b.date - a.date);
     const total = logs.reduce((s, l) => s + (l.hours || 0), 0);
+    const crewOpts = state.crew.length
+      ? `<option value="">— Unassigned —</option>` +
+        state.crew.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")
+      : `<option value="">No crew members</option>`;
     const tableSection =
       logs.length === 0
         ? `<div class="empty" style="margin-bottom:16px;">No time logs yet. Add hours manually below.</div>`
@@ -3148,23 +3215,26 @@ function openJobDetailModal(job) {
           <table class="table">
             <thead><tr>
               <th>Date</th>
+              <th>Crew Member</th>
               <th style="text-align:right;">Hours</th>
               <th>Note</th>
               <th></th>
             </tr></thead>
             <tbody>
               ${logs
-                .map(
-                  (l) => `
+                .map((l) => {
+                  const member = l.crewId ? state.crew.find((c) => c.id === l.crewId) : null;
+                  return `
                 <tr>
                   <td>${fmtDate(l.date)}</td>
+                  <td><span class="small">${member ? esc(member.name) : `<span class="faint">—</span>`}</span></td>
                   <td style="text-align:right;"><strong>${(l.hours || 0).toFixed(2)}h</strong></td>
                   <td><span class="small">${l.note ? esc(l.note) : `<span class="faint">—</span>`}</span></td>
                   <td>
                     <button class="btn danger" data-dtl="${l.id}" style="padding:4px 10px;font-size:11px;">Remove</button>
                   </td>
-                </tr>`,
-                )
+                </tr>`;
+                })
                 .join("")}
             </tbody>
           </table>
@@ -3179,6 +3249,7 @@ function openJobDetailModal(job) {
         <div class="sectionLabel">Add Manual Entry</div>
         <div class="addCostGrid">
           <div class="field"><label for="mtDate">Date</label><input id="mtDate" class="input" type="date" value="${fmtDateInput(Date.now())}"/></div>
+          <div class="field"><label for="mtCrew">Crew Member</label><select id="mtCrew" class="input">${crewOpts}</select></div>
           <div class="field"><label for="mtHrs">Hours</label><input id="mtHrs" class="input" type="number" min="0.1" step="0.1" placeholder="e.g. 4.5"/></div>
           <div class="field"><label for="mtNote">Note (optional)</label><input id="mtNote" class="input" type="text" maxlength="200" placeholder="What was done…"/></div>
           <div class="field addCostBtn"><label style="visibility:hidden">a</label><button type="button" class="btn primary" id="btnMTAdd">+ Add Hours</button></div>
@@ -3544,12 +3615,14 @@ function openJobDetailModal(job) {
       }
       hrsEl.classList.remove("invalid");
       const dateVal = root.querySelector("#mtDate").value;
+      const crewId = root.querySelector("#mtCrew")?.value || null;
       const log = {
         id: uid(),
         jobId: job.id,
         hours: hrs,
         date: dateVal ? parseDate(dateVal) || Date.now() : Date.now(),
         note: root.querySelector("#mtNote").value.trim(),
+        crewId: crewId || null,
         manual: true,
       };
       idb
@@ -3669,23 +3742,105 @@ function openJobDetailModal(job) {
 
     root.querySelectorAll(".photoThumb img").forEach((img) => {
       img.addEventListener("click", () => {
-        /* Open full-size in a lightbox modal */
+        const pid = img.dataset.pid;
         const lb = document.createElement("div");
         lb.className = "lightbox";
         lb.innerHTML = `
             <div class="lightboxBg"></div>
-            <img src="${img.src}" class="lightboxImg" alt="Photo"/>
-            <button class="lightboxClose" aria-label="Close">✕</button>`;
+            <div class="lightboxImgWrap">
+              <img src="${img.src}" class="lightboxImg" alt="Photo"/>
+            </div>
+            <button class="lightboxClose" aria-label="Close">✕</button>
+            <div class="lightboxToolbar">
+              <button class="btn lbAnnotateBtn">✏️ Annotate</button>
+            </div>`;
         document.body.appendChild(lb);
+
+        const lbImg = lb.querySelector(".lightboxImg");
+        const wrap = lb.querySelector(".lightboxImgWrap");
+        const toolbar = lb.querySelector(".lightboxToolbar");
+
         const closeLb = () => lb.remove();
         lb.querySelector(".lightboxBg").addEventListener("click", closeLb);
         lb.querySelector(".lightboxClose").addEventListener("click", closeLb);
-        document.addEventListener("keydown", function esc(e) {
-          if (e.key === "Escape") {
-            closeLb();
-            document.removeEventListener("keydown", esc);
-          }
+        document.addEventListener("keydown", function escKey(e) {
+          if (e.key === "Escape") { closeLb(); document.removeEventListener("keydown", escKey); }
         });
+
+        function startAnnotation() {
+          const dw = lbImg.clientWidth;
+          const dh = lbImg.clientHeight;
+          const drawCanvas = document.createElement("canvas");
+          drawCanvas.className = "annotateCanvas";
+          drawCanvas.width = dw;
+          drawCanvas.height = dh;
+          wrap.appendChild(drawCanvas);
+
+          const ctx = drawCanvas.getContext("2d");
+          ctx.strokeStyle = "#ff0000";
+          ctx.lineWidth = 4;
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+
+          let drawing = false;
+
+          const getPos = (e) => {
+            const r = drawCanvas.getBoundingClientRect();
+            const cx = e.clientX ?? e.touches?.[0].clientX ?? 0;
+            const cy = e.clientY ?? e.touches?.[0].clientY ?? 0;
+            return [(cx - r.left) * (dw / r.width), (cy - r.top) * (dh / r.height)];
+          };
+
+          drawCanvas.addEventListener("pointerdown", (e) => {
+            drawing = true;
+            const [x, y] = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            drawCanvas.setPointerCapture(e.pointerId);
+          });
+          drawCanvas.addEventListener("pointermove", (e) => {
+            if (!drawing) return;
+            const [x, y] = getPos(e);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+          });
+          drawCanvas.addEventListener("pointerup", () => { drawing = false; ctx.beginPath(); });
+          drawCanvas.addEventListener("pointercancel", () => { drawing = false; });
+
+          toolbar.innerHTML = `
+            <button class="btn lbCancelDraw">✕ Cancel</button>
+            <button class="btn primary lbSaveDraw">💾 Save Annotation</button>`;
+
+          toolbar.querySelector(".lbCancelDraw").addEventListener("click", () => {
+            drawCanvas.remove();
+            toolbar.innerHTML = `<button class="btn lbAnnotateBtn">✏️ Annotate</button>`;
+            toolbar.querySelector(".lbAnnotateBtn").addEventListener("click", startAnnotation);
+          });
+
+          toolbar.querySelector(".lbSaveDraw").addEventListener("click", () => {
+            const off = document.createElement("canvas");
+            off.width = lbImg.naturalWidth;
+            off.height = lbImg.naturalHeight;
+            const offCtx = off.getContext("2d");
+            offCtx.drawImage(lbImg, 0, 0);
+            offCtx.drawImage(drawCanvas, 0, 0, lbImg.naturalWidth, lbImg.naturalHeight);
+            const merged = off.toDataURL("image/jpeg", 0.85);
+            const photo = (job.photos || []).find((p) => p.id === pid);
+            if (photo) {
+              photo.data = merged;
+              photo.dataUrl = merged;
+              saveJob(job).then(() => {
+                toast.success("Annotation saved", "Photo updated.");
+                closeLb();
+                switchTab("photos");
+              });
+            }
+          });
+        }
+
+        lb.querySelector(".lbAnnotateBtn").addEventListener("click", startAnnotation);
       });
     });
   }
@@ -5675,6 +5830,9 @@ function renderSettings(root) {
           ...(data.mileageLogs || []).map((m) =>
             idb.put(APP.stores.mileageLogs, m),
           ),
+          ...(data.equipment || []).map((eq) =>
+            idb.put(APP.stores.equipment, eq),
+          ),
         ])
           .then(() =>
             Promise.all([
@@ -5686,6 +5844,7 @@ function renderSettings(root) {
               idb.getAll(APP.stores.inventory),
               idb.getAll(APP.stores.estimates),
               idb.getAll(APP.stores.mileageLogs),
+              idb.getAll(APP.stores.equipment),
             ]),
           )
           .then(
@@ -5698,6 +5857,7 @@ function renderSettings(root) {
               inventory,
               estimates,
               mileageLogs,
+              equipment,
             ]) => {
               state.jobs = jobs;
               state.timeLogs = tl;
@@ -5707,6 +5867,7 @@ function renderSettings(root) {
               state.inventory = inventory;
               state.estimates = estimates;
               state.mileageLogs = mileageLogs;
+              state.equipment = equipment;
               toast.success(
                 "Import complete",
                 `${data.jobs.length} jobs imported.`,
@@ -6095,13 +6256,156 @@ function openEstimateModal(est) {
   });
 }
 
+/* ─── Payroll Report ─────────────────────────── */
+function openPayrollModal() {
+  const now = new Date();
+  const firstOfMonth = fmtDateInput(new Date(now.getFullYear(), now.getMonth(), 1).getTime());
+  const today = fmtDateInput(now.getTime());
+
+  modal.open(`
+    <div class="modalHd">
+      <div><h2>Payroll Report</h2><p>Calculate crew pay for a date range.</p></div>
+      <button class="closeX" aria-label="Close">&times;</button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid" style="margin-bottom:16px;">
+        <div class="field"><label for="prStart">Start Date</label><input id="prStart" class="input" type="date" value="${firstOfMonth}"/></div>
+        <div class="field"><label for="prEnd">End Date</label><input id="prEnd" class="input" type="date" value="${today}"/></div>
+      </div>
+      <button class="btn primary" id="btnGenPayroll" style="width:100%;">Generate Report</button>
+      <div id="payrollResult" style="margin-top:20px;"></div>
+    </div>`);
+
+  const m = document.querySelector(".modal");
+
+  m.querySelector("#btnGenPayroll").addEventListener("click", () => {
+    const start = parseDate(m.querySelector("#prStart").value);
+    const end = parseDate(m.querySelector("#prEnd").value);
+    if (!start || !end || start > end) {
+      toast.warn("Invalid range", "Please select a valid start and end date.");
+      return;
+    }
+    const endOfDay = end + 86399999; /* include the full end day */
+
+    /* Group logs by crewId within date range */
+    const byMember = {};
+    state.timeLogs.forEach((l) => {
+      if (!l.crewId) return;
+      if (l.date < start || l.date > endOfDay) return;
+      byMember[l.crewId] = (byMember[l.crewId] || 0) + (l.hours || 0);
+    });
+
+    /* Also include crew members with 0 hours (for reference) */
+    state.crew.forEach((c) => {
+      if (!(c.id in byMember)) byMember[c.id] = 0;
+    });
+
+    const rows = Object.entries(byMember).map(([cid, hours]) => {
+      const member = state.crew.find((c) => c.id === cid);
+      const name = member ? member.name : "Unknown";
+      const rate = member?.hourlyRate || 0;
+      return { name, hours, rate, total: hours * rate };
+    }).sort((a, b) => b.total - a.total);
+
+    const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+
+    if (rows.length === 0) {
+      m.querySelector("#payrollResult").innerHTML = `<div class="empty">No time logs with assigned crew members in this period.</div>`;
+      return;
+    }
+
+    m.querySelector("#payrollResult").innerHTML = `
+      <div class="tableWrap">
+        <table class="table" id="payrollTable">
+          <thead><tr>
+            <th>Name</th>
+            <th style="text-align:right;">Hours</th>
+            <th style="text-align:right;">Rate ($/hr)</th>
+            <th style="text-align:right;">Total Pay</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map((r) => `
+              <tr>
+                <td><strong>${esc(r.name)}</strong></td>
+                <td style="text-align:right;">${r.hours.toFixed(2)}h</td>
+                <td style="text-align:right;">${fmt(r.rate)}</td>
+                <td style="text-align:right;"><strong>${fmt(r.total)}</strong></td>
+              </tr>`).join("")}
+          </tbody>
+          <tfoot><tr>
+            <td colspan="3"><strong>Grand Total</strong></td>
+            <td style="text-align:right;"><strong>${fmt(grandTotal)}</strong></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <button class="btn" id="btnPayrollPDF" style="margin-top:12px;width:100%;">⬇ Export PDF</button>`;
+
+    m.querySelector("#btnPayrollPDF").addEventListener("click", () => {
+      if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: "mm", format: "letter" });
+      const co = state.settings.company || "JobCost Pro";
+      const startLabel = new Date(start).toLocaleDateString("en-US");
+      const endLabel = new Date(endOfDay).toLocaleDateString("en-US");
+
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text("Payroll Report", 14, 20);
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${co}`, 14, 28);
+      doc.text(`Period: ${startLabel} — ${endLabel}`, 14, 34);
+      doc.text(`Generated: ${new Date().toLocaleDateString("en-US")}`, 14, 40);
+
+      /* Table header */
+      let y = 52;
+      doc.setFillColor(30, 40, 60);
+      doc.rect(14, y - 5, 183, 8, "F");
+      doc.setTextColor(255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text("Name", 16, y);
+      doc.text("Hours", 110, y, { align: "right" });
+      doc.text("Rate", 145, y, { align: "right" });
+      doc.text("Total Pay", 197, y, { align: "right" });
+      doc.setTextColor(0);
+      y += 10;
+
+      rows.forEach((r, i) => {
+        if (i % 2 === 0) { doc.setFillColor(245, 247, 252); doc.rect(14, y - 5, 183, 7, "F"); }
+        doc.setFont("helvetica", "normal");
+        doc.text(r.name.slice(0, 35), 16, y);
+        doc.text(`${r.hours.toFixed(2)}h`, 110, y, { align: "right" });
+        doc.text(`$${r.rate.toFixed(2)}/hr`, 145, y, { align: "right" });
+        doc.setFont("helvetica", "bold");
+        doc.text(fmt(r.total), 197, y, { align: "right" });
+        y += 8;
+      });
+
+      /* Footer total */
+      doc.setDrawColor(180);
+      doc.line(14, y, 197, y);
+      y += 6;
+      doc.setFont("helvetica", "bold");
+      doc.text("Grand Total", 16, y);
+      doc.text(fmt(grandTotal), 197, y, { align: "right" });
+
+      doc.save(`payroll_${startLabel.replace(/\//g, "-")}_${endLabel.replace(/\//g, "-")}.pdf`);
+      toast.success("Payroll PDF exported");
+    });
+  });
+}
+
 /* ─── Crew ───────────────────────────────────── */
 function renderCrew(root) {
   const sorted = [...state.crew].sort((a, b) => a.name.localeCompare(b.name));
   root.innerHTML = `
       <div class="pageHeader">
         <h2 class="pageTitle">Crew &amp; Technicians <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length})</span></h2>
-        <button class="btn primary admin-only" id="btnNCr">+ Add Member</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn admin-only" id="btnPayroll">📊 Payroll Report</button>
+          <button class="btn primary admin-only" id="btnNCr">+ Add Member</button>
+        </div>
       </div>
       ${
         sorted.length === 0
@@ -6138,6 +6442,7 @@ function renderCrew(root) {
           </table></div>`
       }`;
 
+  root.querySelector("#btnPayroll")?.addEventListener("click", openPayrollModal);
   root
     .querySelector("#btnNCr")
     ?.addEventListener("click", () => openCrewModal(null));
@@ -6240,6 +6545,89 @@ function openCrewModal(member) {
   });
 }
 
+/* ─── Equipment Tracker ──────────────────────── */
+function openEquipmentModal(eq) {
+  const isEdit = !!eq;
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>${isEdit ? "Edit Equipment" : "Add Equipment"}</h2>
+        <p>${isEdit ? esc(eq.name) : "Add a tool or machine to track."}</p></div>
+      <button class="closeX" aria-label="Close">&times;</button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid">
+        <div class="field"><label for="eqName">Name *</label>
+          <input id="eqName" class="input" type="text" maxlength="100" placeholder="e.g. Fiber Machine" value="${isEdit ? esc(eq.name) : ""}"/></div>
+        <div class="field"><label for="eqSerial">Serial / Model #</label>
+          <input id="eqSerial" class="input" type="text" maxlength="80" placeholder="Optional" value="${isEdit ? esc(eq.serialNumber || "") : ""}"/></div>
+        <div class="field" style="grid-column:1/-1;"><label for="eqNotes">Notes</label>
+          <textarea id="eqNotes" class="input" rows="2" maxlength="300" placeholder="Purchase date, maintenance notes…">${isEdit ? esc(eq.notes || "") : ""}</textarea></div>
+      </div>
+    </div>
+    <div class="modalFt">
+      <button class="btn closeX">Cancel</button>
+      <button class="btn primary" id="btnEqSave">${isEdit ? "Save Changes" : "Add Equipment"}</button>
+    </div>`);
+
+  m.querySelector("#btnEqSave").addEventListener("click", () => {
+    const nameEl = m.querySelector("#eqName");
+    const name = nameEl.value.trim();
+    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
+    const item = {
+      id: isEdit ? eq.id : uid(),
+      name,
+      serialNumber: m.querySelector("#eqSerial").value.trim(),
+      notes: m.querySelector("#eqNotes").value.trim(),
+      status: isEdit ? eq.status : "available",
+      assignedTo: isEdit ? (eq.assignedTo || null) : null,
+      jobId: isEdit ? (eq.jobId || null) : null,
+      checkedOutAt: isEdit ? (eq.checkedOutAt || null) : null,
+    };
+    saveEquipment(item).then(() => {
+      toast.success(isEdit ? "Equipment updated" : "Equipment added", name);
+      modal.close();
+      render();
+    });
+  });
+}
+
+function openCheckOutModal(eq) {
+  const crewOpts = state.crew.length
+    ? state.crew.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")
+    : `<option value="">No crew members</option>`;
+  const jobOpts = state.jobs.filter((j) => !["Completed", "Invoiced"].includes(j.status))
+    .map((j) => `<option value="${j.id}">${esc(j.name)}</option>`).join("")
+    || `<option value="">No active jobs</option>`;
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>Check Out Equipment</h2><p>${esc(eq.name)}</p></div>
+      <button class="closeX" aria-label="Close">&times;</button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid">
+        <div class="field"><label for="coMember">Assign To (Crew Member)</label>
+          <select id="coMember" class="input"><option value="">— Unassigned —</option>${crewOpts}</select></div>
+        <div class="field"><label for="coJob">Job</label>
+          <select id="coJob" class="input"><option value="">— No job —</option>${jobOpts}</select></div>
+      </div>
+    </div>
+    <div class="modalFt">
+      <button class="btn closeX">Cancel</button>
+      <button class="btn primary" id="btnCoSave">Check Out</button>
+    </div>`);
+
+  m.querySelector("#btnCoSave").addEventListener("click", () => {
+    const assignedTo = m.querySelector("#coMember").value || null;
+    const jobId = m.querySelector("#coJob").value || null;
+    saveEquipment({ ...eq, status: "checkedout", assignedTo, jobId, checkedOutAt: Date.now() }).then(() => {
+      toast.success("Equipment checked out", eq.name);
+      modal.close();
+      render();
+    });
+  });
+}
+
 /* ─── Inventory ──────────────────────────────── */
 function renderInventory(root) {
   const lowItems = state.inventory.filter(
@@ -6253,6 +6641,8 @@ function renderInventory(root) {
     (s, i) => s + (i.quantity || 0) * (i.unitCost || 0),
     0,
   );
+  const sortedEq = [...state.equipment].sort((a, b) => a.name.localeCompare(b.name));
+  const checkedOut = sortedEq.filter((e) => e.status === "checkedout").length;
 
   root.innerHTML = `
       <div class="pageHeader">
@@ -6326,7 +6716,44 @@ function renderInventory(root) {
                 .join("")}
             </tbody>
           </table></div>`
-      }`;
+      }
+
+      <div class="pageHeader" style="margin-top:32px;">
+        <h2 class="pageTitle">Tools &amp; Equipment <span class="muted" style="font-size:14px;font-weight:400;">(${sortedEq.length} items · ${checkedOut} checked out)</span></h2>
+        <button class="btn primary admin-only" id="btnNEq">+ Add Equipment</button>
+      </div>
+      ${sortedEq.length === 0
+        ? `<div class="empty">No equipment added yet. Track your expensive tools and machines here.</div>`
+        : `<div class="tableWrap"><table class="table">
+          <thead><tr>
+            <th>Name</th><th>Serial #</th><th>Status</th>
+            <th>Assigned To</th><th>Job</th><th>Notes</th><th>Actions</th>
+          </tr></thead>
+          <tbody>
+            ${sortedEq.map((eq) => {
+              const assignedMember = eq.assignedTo ? state.crew.find((c) => c.id === eq.assignedTo) : null;
+              const assignedJob = eq.jobId ? state.jobs.find((j) => j.id === eq.jobId) : null;
+              const isOut = eq.status === "checkedout";
+              return `<tr>
+                <td><strong>${esc(eq.name)}</strong></td>
+                <td><span class="small muted">${esc(eq.serialNumber || "—")}</span></td>
+                <td><span class="invBadge ${isOut ? "low" : "instock"}">${isOut ? "Checked Out" : "Available"}</span></td>
+                <td>${assignedMember ? esc(assignedMember.name) : `<span class="muted">—</span>`}</td>
+                <td>${assignedJob ? esc(assignedJob.name) : `<span class="muted">—</span>`}</td>
+                <td><span class="small">${esc(eq.notes || "")}</span></td>
+                <td>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                    ${isOut
+                      ? `<button class="btn primary admin-only" data-eqret="${eq.id}" style="padding:5px 9px;font-size:12px;">↩ Return</button>`
+                      : `<button class="btn admin-only" data-eqout="${eq.id}" style="padding:5px 9px;font-size:12px;">↗ Check Out</button>`}
+                    <button class="btn admin-only" data-eeq="${eq.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                    <button class="btn danger admin-only" data-deq="${eq.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table></div>`}`;
 
   root
     .querySelector("#btnNInv")
@@ -6347,6 +6774,43 @@ function renderInventory(root) {
           toast.warn("Item deleted", item.name);
           render();
         });
+      });
+    }),
+  );
+
+  root.querySelector("#btnNEq")?.addEventListener("click", () => openEquipmentModal(null));
+  root.querySelectorAll("[data-eeq]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const eq = state.equipment.find((x) => x.id === btn.dataset.eeq);
+      if (eq) openEquipmentModal(eq);
+    }),
+  );
+  root.querySelectorAll("[data-deq]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const eq = state.equipment.find((x) => x.id === btn.dataset.deq);
+      if (!eq) return;
+      confirm("Delete Equipment", eq.name, "Delete", () => {
+        idb.del(APP.stores.equipment, eq.id).then(() => {
+          state.equipment = state.equipment.filter((x) => x.id !== eq.id);
+          toast.warn("Equipment deleted", eq.name);
+          render();
+        });
+      });
+    }),
+  );
+  root.querySelectorAll("[data-eqout]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const eq = state.equipment.find((x) => x.id === btn.dataset.eqout);
+      if (eq) openCheckOutModal(eq);
+    }),
+  );
+  root.querySelectorAll("[data-eqret]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const eq = state.equipment.find((x) => x.id === btn.dataset.eqret);
+      if (!eq) return;
+      saveEquipment({ ...eq, status: "available", assignedTo: null, jobId: null, checkedOutAt: null }).then(() => {
+        toast.success("Equipment returned", eq.name);
+        render();
       });
     }),
   );

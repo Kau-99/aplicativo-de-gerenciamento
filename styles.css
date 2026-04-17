@@ -1529,6 +1529,41 @@ select {
   font-family: inherit;
 }
 
+/* Lightbox annotation */
+.lightboxImgWrap {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  line-height: 0;
+}
+
+.lightboxImgWrap .lightboxImg {
+  position: static;
+  display: block;
+}
+
+.annotateCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+  z-index: 2;
+  border-radius: 12px;
+}
+
+.lightboxToolbar {
+  position: absolute;
+  bottom: max(24px, env(safe-area-inset-bottom, 24px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 /* ─── Analytics ──────────────────────────────────────────── */
 .biGrid {
   display: grid;

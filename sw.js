@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v13";
+const CACHE = "jobcost-v14";
 const ASSETS = [
   "./index.html",
   "./app.js",
@@ -18,9 +18,13 @@ self.addEventListener("install", (e) => {
       .open(CACHE)
       .then((c) =>
         Promise.allSettled(ASSETS.map((url) => c.add(url).catch(() => {}))),
-      )
-      .then(() => self.skipWaiting()),
+      ),
   );
+  /* Do NOT call skipWaiting() here — the update toast in the app handles it. */
+});
+
+self.addEventListener("message", (e) => {
+  if (e.data?.action === "skipWaiting") self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {

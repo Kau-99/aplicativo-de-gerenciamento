@@ -1,7 +1,7 @@
 /* ─── App Config ─────────────────────────────────────────── */
 export const APP = {
   dbName: "jobcost_pro_db",
-  dbVersion: 7,
+  dbVersion: 8,
   stores: {
     jobs: "jobs",
     timeLogs: "timeLogs",
@@ -11,6 +11,7 @@ export const APP = {
     inventory: "inventory",
     estimates: "estimates",
     mileageLogs: "mileageLogs",
+    equipment: "equipment",
   },
   lsKey: "jobcost_pro_v2",
 };
