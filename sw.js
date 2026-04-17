@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v15";
+const CACHE = "jobcost-v16";
 const ASSETS = [
   "./index.html",
   "./app.js",
@@ -9,8 +9,8 @@ const ASSETS = [
   "./manifest.json",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
   "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
-  "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
-  "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js",
+  "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
+  "https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js",
 ];
 
 self.addEventListener("install", (e) => {
