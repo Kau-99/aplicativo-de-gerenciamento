@@ -2136,6 +2136,17 @@ a.link:hover {
   margin-top: 6px;
 }
 
+/* Map pin link in time logs */
+.mapPinLink {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 5px;
+  color: var(--primary);
+  opacity: 0.75;
+  transition: opacity .15s;
+}
+.mapPinLink:hover { opacity: 1; }
+
 /* ─── Inventory badges ───────────────────────────────────── */
 .invBadge {
   display: inline-block;

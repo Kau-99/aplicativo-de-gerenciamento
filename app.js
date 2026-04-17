@@ -1,4 +1,4 @@
-import { APP, T } from "./config.js";
+import { APP, T, ATTIC_CALC, ATTIC_DEFAULT_BAG_COST, ATTIC_DEFAULT_LABOR_RATE } from "./config.js";
 import {
   $,
   $$,
@@ -749,6 +749,204 @@ function showQRModal(job) {
       .then(() => toast.info("Copied", "Clock-in link copied."));
   });
   m.querySelector("#bjQRClose").addEventListener("click", modal.close);
+}
+
+/* ─── QR Code Job Share ──────────────────────── */
+function showJobShareQR(job) {
+  /* Slim payload — no photos/timeLogs to stay within QR capacity (~2KB) */
+  const slim = {
+    _v: 1,
+    id: job.id,
+    name: job.name,
+    client: job.client || "",
+    status: job.status,
+    value: job.value || 0,
+    date: job.date,
+    zip: job.zip || "",
+    city: job.city || "",
+    state: job.state || "",
+    notes: (job.notes || "").slice(0, 200),
+    tags: job.tags || [],
+    costs: (job.costs || []).slice(0, 15).map((c) => ({
+      d: c.description, q: c.qty, u: c.unitCost, cat: c.category,
+    })),
+  };
+  const payload = JSON.stringify(slim);
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>Share Job via QR</h2><p>${esc(job.name)}</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 16px;">
+      <canvas id="shareQRCanvas"></canvas>
+      <p class="small muted" style="text-align:center;max-width:300px;">
+        Scan with another device running JobCost Pro to import this job.<br>
+        <span style="font-size:11px;">Photos &amp; time logs are not included to keep the QR scannable.</span>
+      </p>
+      <div style="display:flex;gap:8px;">
+        <button class="btn" id="btnDlShareQR">⬇ Download PNG</button>
+      </div>
+    </div>
+    <div class="modalFt"><button class="btn closeX">Close</button></div>`);
+
+  setTimeout(() => {
+    const canvas = document.getElementById("shareQRCanvas");
+    if (!canvas) return;
+    if (!window.QRCode) {
+      canvas.parentElement.innerHTML = `<p class="small muted">QR library not loaded yet. Try again in a moment.</p>`;
+      return;
+    }
+    QRCode.toCanvas(canvas, payload, { width: 240, margin: 2, errorCorrectionLevel: "M" }, (err) => {
+      if (err) canvas.parentElement.insertAdjacentHTML("beforeend",
+        `<p class="small" style="color:var(--danger)">Job too large for QR (try reducing costs/notes).</p>`);
+    });
+  }, 60);
+
+  m.querySelector("#btnDlShareQR")?.addEventListener("click", () => {
+    const canvas = document.getElementById("shareQRCanvas");
+    if (!canvas) return;
+    const a = document.createElement("a");
+    a.download = `job_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 30)}_QR.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  });
+}
+
+/* ─── QR Scanner ─────────────────────────────── */
+function openQRScanner() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast.warn("Camera unavailable", "Camera access requires HTTPS and a supported browser.");
+    return;
+  }
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>📷 Scan Job QR</h2><p>Point camera at a JobCost Pro Share QR code.</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;">
+      <div style="position:relative;width:100%;max-width:320px;">
+        <video id="qrVideo" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;"></video>
+        <canvas id="qrScanCanvas" style="display:none;"></canvas>
+        <div style="position:absolute;inset:0;border:2px solid var(--primary);border-radius:10px;pointer-events:none;"></div>
+      </div>
+      <p id="qrScanStatus" class="small muted">Initializing camera…</p>
+    </div>
+    <div class="modalFt"><button class="btn closeX" id="btnQRScanClose">Cancel</button></div>`);
+
+  let stream = null;
+  let rafId = null;
+  let useBarcodeDetector = false;
+  let detector = null;
+
+  const statusEl = () => document.getElementById("qrScanStatus");
+  const video = document.getElementById("qrVideo");
+  const scanCanvas = document.getElementById("qrScanCanvas");
+
+  const stopScan = () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+  };
+
+  m.querySelector("#btnQRScanClose")?.addEventListener("click", stopScan);
+  /* Also stop when modal is closed via X or overlay */
+  const origClose = modal.close.bind(modal);
+  m.addEventListener("remove", stopScan);
+
+  const handlePayload = (data) => {
+    stopScan();
+    try {
+      const obj = JSON.parse(data);
+      if (obj._v !== 1 || !obj.id || !obj.name) {
+        toast.error("Invalid QR", "This QR code is not a JobCost Pro job.");
+        modal.close();
+        return;
+      }
+      /* Expand slim payload back to full job shape */
+      const imported = {
+        id: obj.id,
+        name: obj.name,
+        client: obj.client || "",
+        status: obj.status || "Lead",
+        value: obj.value || 0,
+        date: obj.date || Date.now(),
+        zip: obj.zip || "",
+        city: obj.city || "",
+        state: obj.state || "",
+        notes: obj.notes || "",
+        tags: obj.tags || [],
+        costs: (obj.costs || []).map((c) => ({
+          id: uid(), description: c.d, qty: c.q, unitCost: c.u, category: c.cat,
+        })),
+        photos: [],
+        crewIds: [],
+        paymentStatus: "Unpaid",
+        paidDate: null,
+        invoiceNumber: null,
+        _importedViaQR: true,
+      };
+      const existing = state.jobs.find((j) => j.id === imported.id);
+      if (existing) {
+        toast.info("Already exists", `"${imported.name}" is already in your jobs.`);
+        modal.close();
+        return;
+      }
+      saveJob(imported).then(() => {
+        toast.success("Job imported!", imported.name);
+        modal.close();
+        render();
+      });
+    } catch {
+      toast.error("Scan error", "Could not parse QR data.");
+      modal.close();
+    }
+  };
+
+  /* ── BarcodeDetector (native, Chrome/Android) ── */
+  if ("BarcodeDetector" in window) {
+    useBarcodeDetector = true;
+    detector = new BarcodeDetector({ formats: ["qr_code"] });
+  }
+
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+    .then((s) => {
+      stream = s;
+      video.srcObject = s;
+      const st = statusEl();
+      if (st) st.textContent = useBarcodeDetector ? "Scanning…" : "Scanning… (jsQR)";
+
+      const tick = async () => {
+        if (!video.videoWidth) { rafId = requestAnimationFrame(tick); return; }
+        scanCanvas.width = video.videoWidth;
+        scanCanvas.height = video.videoHeight;
+        const ctx = scanCanvas.getContext("2d");
+        ctx.drawImage(video, 0, 0);
+
+        try {
+          if (useBarcodeDetector) {
+            const results = await detector.detect(video);
+            if (results.length) { handlePayload(results[0].rawValue); return; }
+          } else if (window.jsQR) {
+            const img = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+            const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+            if (code) { handlePayload(code.data); return; }
+          }
+        } catch {}
+        rafId = requestAnimationFrame(tick);
+      };
+      video.onloadedmetadata = () => { rafId = requestAnimationFrame(tick); };
+    })
+    .catch(() => {
+      const st = statusEl();
+      if (st) st.textContent = "Camera access denied. Allow camera and try again.";
+      if (st) st.style.color = "var(--danger)";
+    });
 }
 
 /* ─── Save Client ─────────────────────────────── */
@@ -3224,9 +3422,17 @@ function openJobDetailModal(job) {
               ${logs
                 .map((l) => {
                   const member = l.crewId ? state.crew.find((c) => c.id === l.crewId) : null;
+                  const pinLink = l.lat && l.lng
+                    ? `<a href="https://maps.google.com/?q=${l.lat},${l.lng}" target="_blank" rel="noopener" class="mapPinLink" title="View location (${l.lat.toFixed(4)}, ${l.lng.toFixed(4)})">
+                        <svg viewBox="0 0 24 24" fill="none" width="14" height="14" style="vertical-align:middle;">
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z" stroke="currentColor" stroke-width="1.6"/>
+                          <circle cx="12" cy="9" r="2.5" stroke="currentColor" stroke-width="1.6"/>
+                        </svg>
+                      </a>`
+                    : "";
                   return `
                 <tr>
-                  <td>${fmtDate(l.date)}</td>
+                  <td>${fmtDate(l.date)}${pinLink}</td>
                   <td><span class="small">${member ? esc(member.name) : `<span class="faint">—</span>`}</span></td>
                   <td style="text-align:right;"><strong>${(l.hours || 0).toFixed(2)}h</strong></td>
                   <td><span class="small">${l.note ? esc(l.note) : `<span class="faint">—</span>`}</span></td>
@@ -3479,6 +3685,7 @@ function openJobDetailModal(job) {
         <button type="button" class="btn admin-only" id="bjDup">Duplicate</button>
         <button type="button" class="btn admin-only" id="bjEdit">Edit</button>
         <button type="button" class="btn admin-only" id="bjQR" title="QR Clock-In">QR</button>
+        <button type="button" class="btn admin-only" id="bjShareQR" title="Share job via QR">Share QR</button>
         <button type="button" class="btn admin-only" id="bjShare">Share</button>
         <button type="button" class="btn admin-only" id="bjInvoice">Invoice PDF</button>
         <button type="button" class="btn admin-only" id="bjWorkOrder">Work Order</button>
@@ -3624,16 +3831,28 @@ function openJobDetailModal(job) {
         note: root.querySelector("#mtNote").value.trim(),
         crewId: crewId || null,
         manual: true,
+        lat: null,
+        lng: null,
       };
-      idb
-        .put(APP.stores.timeLogs, log)
-        .then(() => {
-          state.timeLogs.push(log);
-          toast.success("Hours added", `${hrs}h logged.`);
-          switchTab("timelogs");
-          render();
-        })
-        .catch(() => toast.error("Error", "Could not save hours."));
+      const persistLog = () =>
+        idb.put(APP.stores.timeLogs, log)
+          .then(() => {
+            state.timeLogs.push(log);
+            toast.success("Hours added", `${hrs}h logged.`);
+            switchTab("timelogs");
+            render();
+          })
+          .catch(() => toast.error("Error", "Could not save hours."));
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => { log.lat = pos.coords.latitude; log.lng = pos.coords.longitude; persistLog(); },
+          () => persistLog(),
+          { timeout: 5000, maximumAge: 60000 },
+        );
+      } else {
+        persistLog();
+      }
     });
 
     root.querySelectorAll("[data-dtl]").forEach((btn) => {
@@ -3963,6 +4182,7 @@ function openJobDetailModal(job) {
     openJobModal(job);
   });
   m.querySelector("#bjQR").addEventListener("click", () => showQRModal(job));
+  m.querySelector("#bjShareQR").addEventListener("click", () => showJobShareQR(job));
   m.querySelector("#bjShare").addEventListener("click", () => shareJob(job));
   m.querySelector("#bjInvoice").addEventListener("click", () =>
     exportInvoicePDF(job),
@@ -4565,6 +4785,17 @@ function renderDashboard(root) {
   root.innerHTML = `
       ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
       ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;">📦 ${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+        <button class="btn" id="btnScanQR" title="Scan a Job QR code to import a job from another device">
+          <svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="margin-right:5px;vertical-align:middle;" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
+            <rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M14 14h2v2h-2zM18 14h3M14 18h3M18 18h3v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+          Scan Job QR
+        </button>
+      </div>
       <div class="kpiGrid">
         <div class="card cardBody kpi">
           <div class="kpiVal">${state.jobs.length}</div>
@@ -4671,6 +4902,7 @@ function renderDashboard(root) {
   root
     .querySelector("#btnDN")
     ?.addEventListener("click", () => openJobModal(null));
+  root.querySelector("#btnScanQR")?.addEventListener("click", openQRScanner);
   root.querySelectorAll("[data-detail]").forEach((el) =>
     el.addEventListener("click", () => {
       const j = state.jobs.find((x) => x.id === el.dataset.detail);
@@ -5187,6 +5419,8 @@ function renderFieldApp(root) {
         hours: hrs,
         date: Date.now(),
         note,
+        lat: state.fieldSession.data.lat || null,
+        lng: state.fieldSession.data.lng || null,
       };
       clearInterval(state.liveTimer);
       state.liveTimer = null;
@@ -6131,6 +6365,111 @@ function renderEstimates(root) {
   );
 }
 
+function openAtticCalcModal(estimateModalEl) {
+  const rOptions = Object.keys(ATTIC_CALC);
+  const currentSqft = estimateModalEl.querySelector("#eSqft")?.value || "";
+  const markup = state.settings.defaultMarkup || 0;
+
+  /* Compute avg labor rate from crew hourly rates */
+  const crewRates = state.crew.map((c) => c.hourlyRate || 0).filter((r) => r > 0);
+  const laborRate = crewRates.length
+    ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length
+    : ATTIC_DEFAULT_LABOR_RATE;
+
+  const calcModal = modal.open(`
+    <div class="modalHd">
+      <div><h2>🏠 Attic Smart Calculator</h2>
+        <p>Auto-fill estimate from square footage &amp; R-Value target.</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid">
+        <div class="field"><label for="acSqft">Square Footage *</label>
+          <input id="acSqft" class="input" type="number" min="1" step="1" placeholder="e.g. 1200" value="${currentSqft}"/></div>
+        <div class="field"><label for="acRVal">Target R-Value</label>
+          <select id="acRVal" class="input">
+            ${rOptions.map((r) => `<option value="${r}">${r}</option>`).join("")}
+          </select></div>
+        <div class="field"><label for="acBagCost">Bag Cost ($/bag)</label>
+          <input id="acBagCost" class="input" type="number" min="0" step="0.01" value="${ATTIC_DEFAULT_BAG_COST}"/></div>
+        <div class="field"><label for="acLaborRate">Labor Rate ($/hr)</label>
+          <input id="acLaborRate" class="input" type="number" min="0" step="0.01" value="${laborRate.toFixed(2)}"/></div>
+      </div>
+      <div id="acPreview" style="margin-top:14px;padding:12px;background:var(--panel2);border-radius:8px;font-size:13px;display:none;"></div>
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn closeX">Cancel</button>
+      <button type="button" class="btn" id="acPreviewBtn">Preview</button>
+      <button type="button" class="btn primary" id="acApply" disabled>Apply to Estimate</button>
+    </div>`);
+
+  let calcResult = null;
+
+  function runCalc() {
+    const sqft = parseFloat(calcModal.querySelector("#acSqft").value);
+    const rKey = calcModal.querySelector("#acRVal").value;
+    const bagCost = parseFloat(calcModal.querySelector("#acBagCost").value) || ATTIC_DEFAULT_BAG_COST;
+    const lRate = parseFloat(calcModal.querySelector("#acLaborRate").value) || laborRate;
+    const tbl = ATTIC_CALC[rKey];
+    if (!sqft || sqft <= 0) return null;
+
+    const bags = Math.ceil((sqft / 1000) * tbl.bagsPerKSqft);
+    const hrs = +((sqft / 1000) * tbl.laborHrsPerKSqft).toFixed(1);
+    const matCost = bags * bagCost;
+    const labCost = hrs * lRate;
+    const subtotal = matCost + labCost;
+    const total = +(subtotal * (1 + markup / 100)).toFixed(2);
+    return { sqft, rKey, rValue: tbl.rValue, bags, hrs, matCost, labCost, subtotal, total, markup };
+  }
+
+  calcModal.querySelector("#acPreviewBtn").addEventListener("click", () => {
+    const r = runCalc();
+    const preview = calcModal.querySelector("#acPreview");
+    const applyBtn = calcModal.querySelector("#acApply");
+    if (!r) {
+      preview.style.display = "block";
+      preview.innerHTML = `<span style="color:var(--danger);">Enter a valid square footage.</span>`;
+      applyBtn.disabled = true;
+      return;
+    }
+    calcResult = r;
+    applyBtn.disabled = false;
+    preview.style.display = "block";
+    preview.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
+        <span class="muted">Bags needed</span><strong>${r.bags} bags</strong>
+        <span class="muted">Labor hours</span><strong>${r.hrs} hrs</strong>
+        <span class="muted">Material cost</span><strong>${fmt(r.matCost)}</strong>
+        <span class="muted">Labor cost</span><strong>${fmt(r.labCost)}</strong>
+        <span class="muted">Subtotal</span><strong>${fmt(r.subtotal)}</strong>
+        ${r.markup > 0 ? `<span class="muted">Markup (${r.markup}%)</span><strong>${fmt(r.total - r.subtotal)}</strong>` : ""}
+        <span class="muted" style="font-size:14px;"><strong>Total</strong></span><strong style="font-size:15px;color:var(--primary);">${fmt(r.total)}</strong>
+      </div>`;
+  });
+
+  calcModal.querySelector("#acApply").addEventListener("click", () => {
+    if (!calcResult) return;
+    const r = calcResult;
+    const sqftEl = estimateModalEl.querySelector("#eSqft");
+    const rVtEl = estimateModalEl.querySelector("#eRVT");
+    const valEl = estimateModalEl.querySelector("#eVal");
+    const notesEl = estimateModalEl.querySelector("#eNotes");
+    const itEl = estimateModalEl.querySelector("#eIT");
+    const atEl = estimateModalEl.querySelector("#eAT");
+    if (sqftEl) sqftEl.value = r.sqft;
+    if (rVtEl) rVtEl.value = r.rValue;
+    if (valEl) valEl.value = r.total.toFixed(2);
+    if (itEl && !itEl.value) itEl.value = "Blown-in Fiberglass";
+    if (atEl && !atEl.value) atEl.value = "Attic";
+    const breakdown = `Smart Calc: ${r.sqft} sqft @ ${r.rKey} — ${r.bags} bags, ${r.hrs} labor hrs. Material: ${fmt(r.matCost)}, Labor: ${fmt(r.labCost)}${r.markup > 0 ? `, Markup: ${r.markup}%` : ""}.`;
+    if (notesEl) notesEl.value = notesEl.value ? notesEl.value + "\n" + breakdown : breakdown;
+    modal.close();
+    toast.success("Smart Calc applied", `${r.bags} bags · ${r.hrs}h labor · ${fmt(r.total)}`);
+  });
+}
+
 function openEstimateModal(est) {
   const isEdit = !!est;
   const INST = [
@@ -6203,9 +6542,11 @@ function openEstimateModal(est) {
       </div>
       <div class="modalFt">
         <button type="button" class="btn" id="eCancel">Cancel</button>
+        <button type="button" class="btn" id="eBtnAttic">🏠 Smart Calc: Attic</button>
         <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
       </div>`);
 
+  m.querySelector("#eBtnAttic").addEventListener("click", () => openAtticCalcModal(m));
   m.querySelector("#eZip")?.addEventListener("blur", () => {
     lookupZIP(m.querySelector("#eZip").value, (city, st) => {
       if (!m.querySelector("#eCity").value)
@@ -6545,6 +6886,180 @@ function openCrewModal(member) {
   });
 }
 
+/* ─── PDF: Purchase Order ────────────────────── */
+function exportPO_PDF(items) {
+  if (!window.jspdf) {
+    toast.error("PDF Error", "jsPDF not loaded.");
+    return;
+  }
+  if (!items || !items.length) {
+    toast.warn("No items", "All inventory is at sufficient stock levels.");
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const s = state.settings;
+  const lm = 14, rr = 196, pw = 182;
+  let y = 18;
+
+  const poNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+
+  /* ── Header bar ── */
+  doc.setFillColor(20, 40, 90);
+  doc.rect(0, 0, 210, 38, "F");
+  if (s.logoDataUrl) {
+    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28); } catch {}
+  }
+  const txtX = s.logoDataUrl ? lm + 32 : lm;
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(22);
+  doc.setFont("helvetica", "bold");
+  doc.text("PURCHASE ORDER", txtX, y);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  if (s.company) doc.text(s.company, txtX, y + 8);
+  if (s.companyAddress) doc.text(s.companyAddress, txtX, y + 14);
+  if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, txtX, y + 20);
+  doc.setFont("helvetica", "bold");
+  doc.text(`PO #: ${poNumber}`, rr, y, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y + 7, { align: "right" });
+  if (s.licenseNumber) doc.text(`Lic: ${s.licenseNumber}`, rr, y + 14, { align: "right" });
+  doc.setTextColor(0);
+  y = 46;
+
+  /* ── Supplier section ── */
+  doc.setFillColor(245, 247, 252);
+  doc.rect(lm, y, pw, 28, "F");
+  doc.setDrawColor(200, 210, 230);
+  doc.rect(lm, y, pw, 28);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("SUPPLIER INFORMATION", lm + 3, y + 6);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text("Company:", lm + 3, y + 13);
+  doc.line(lm + 25, y + 13, lm + 88, y + 13);
+  doc.text("Contact:", lm + 3, y + 19);
+  doc.line(lm + 25, y + 19, lm + 88, y + 19);
+  doc.text("Phone:", lm + 3, y + 25);
+  doc.line(lm + 25, y + 25, lm + 88, y + 25);
+  doc.text("Email:", lm + 95, y + 13);
+  doc.line(lm + 110, y + 13, rr, y + 13);
+  doc.text("Address:", lm + 95, y + 19);
+  doc.line(lm + 115, y + 19, rr, y + 19);
+  doc.text("Terms:", lm + 95, y + 25);
+  doc.line(lm + 115, y + 25, rr, y + 25);
+  doc.setDrawColor(0);
+  y += 34;
+
+  /* ── Delivery info ── */
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text("Deliver to:", lm, y);
+  doc.setFont("helvetica", "normal");
+  const deliverTo = [s.company, s.companyAddress, s.companyPhone].filter(Boolean).join("  ·  ");
+  doc.text(deliverTo || "____________________________________", lm + 25, y);
+  doc.text(`Required by: ____________________`, rr, y, { align: "right" });
+  y += 10;
+
+  /* ── Table header ── */
+  const cols = [lm, lm + 62, lm + 98, lm + 113, lm + 128, lm + 145, lm + 163];
+  const colW = [58, 32, 15, 15, 17, 18, pw - (cols[6] - lm)];
+  doc.setFillColor(20, 40, 90);
+  doc.rect(lm, y - 5, pw, 8, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  ["Item / Description", "Category", "Unit", "On Hand", "Min Stock", "Order Qty", "Unit Cost"].forEach((h, i) =>
+    doc.text(h, cols[i] + 1, y),
+  );
+  doc.setTextColor(0);
+  y += 5;
+
+  /* ── Table rows ── */
+  let grandTotal = 0;
+  items.forEach((item, idx) => {
+    if (y > 250) { doc.addPage(); y = 20; }
+    const orderQty = Math.max(1, (item.minStock || 10) * 2 - (item.quantity || 0));
+    const lineTotal = orderQty * (item.unitCost || 0);
+    grandTotal += lineTotal;
+    const isOut = (item.quantity || 0) <= 0;
+
+    if (idx % 2 === 0) { doc.setFillColor(248, 249, 252); doc.rect(lm, y - 4, pw, 7, "F"); }
+    if (isOut) { doc.setTextColor(200, 30, 30); } else { doc.setTextColor(160, 100, 0); }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(item.name.slice(0, 34), cols[0] + 1, y);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(60, 60, 60);
+    if (item.supplier) doc.text(item.supplier.slice(0, 30), cols[0] + 1, y + 3.5);
+    doc.setTextColor(0);
+    doc.text(esc(item.category || "—").slice(0, 16), cols[1] + 1, y);
+    doc.text(item.unit || "—", cols[2] + 1, y);
+    doc.setTextColor(isOut ? 180 : 0, isOut ? 0 : 0, 0);
+    doc.text(String(item.quantity ?? 0), cols[3] + 1, y);
+    doc.setTextColor(0);
+    doc.text(String(item.minStock ?? 0), cols[4] + 1, y);
+    doc.setFont("helvetica", "bold");
+    doc.setFillColor(255, 235, 100);
+    doc.rect(cols[5], y - 4, colW[5], 7, "F");
+    doc.setTextColor(80, 60, 0);
+    doc.text(String(orderQty), cols[5] + 2, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.text(fmt(item.unitCost || 0), cols[6] + 1, y);
+    y += 8;
+  });
+
+  /* ── Total row ── */
+  y += 2;
+  doc.setFillColor(20, 40, 90);
+  doc.rect(lm, y - 5, pw, 9, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("ESTIMATED TOTAL (at current unit cost)", cols[0] + 1, y);
+  doc.text(fmt(grandTotal), rr, y, { align: "right" });
+  doc.setTextColor(0);
+  y += 14;
+
+  /* ── Notes ── */
+  if (y > 230) { doc.addPage(); y = 20; }
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.text("Notes / Special Instructions:", lm, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFillColor(250, 251, 254);
+  doc.rect(lm, y + 2, pw, 18, "FD");
+  y += 26;
+
+  /* ── Signatures ── */
+  if (y > 255) { doc.addPage(); y = 20; }
+  const sigW = pw / 3 - 4;
+  const sigs = ["Requested By", "Approved By", "Supplier Signature"];
+  sigs.forEach((label, i) => {
+    const sx = lm + i * (sigW + 6);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(label, sx, y);
+    doc.line(sx, y + 12, sx + sigW, y + 12);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.text("Signature / Date", sx, y + 16);
+    if (i === 0 && s.company) { doc.setFont("helvetica", "normal"); doc.text(s.company, sx, y + 5); }
+  });
+
+  /* ── Footer ── */
+  doc.setFontSize(7);
+  doc.setTextColor(150);
+  doc.text(`Generated by JobCost Pro · ${fmtDate(Date.now())} · PO# ${poNumber}`, 105, 290, { align: "center" });
+
+  doc.save(`PO_${poNumber}.pdf`);
+  toast.success("Purchase Order exported", `${items.length} items · Est. ${fmt(grandTotal)}`);
+}
+
 /* ─── Equipment Tracker ──────────────────────── */
 function openEquipmentModal(eq) {
   const isEdit = !!eq;
@@ -6644,11 +7159,14 @@ function renderInventory(root) {
   const sortedEq = [...state.equipment].sort((a, b) => a.name.localeCompare(b.name));
   const checkedOut = sortedEq.filter((e) => e.status === "checkedout").length;
 
+  const needsOrder = [...outItems, ...lowItems];
+
   root.innerHTML = `
       <div class="pageHeader">
         <h2 class="pageTitle">Material Inventory <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length} items)</span></h2>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <span class="muted" style="font-size:13px;">Stock value: <strong>${fmt(totalValue)}</strong></span>
+          ${needsOrder.length ? `<button class="btn admin-only" id="btnGenPO" style="border-color:var(--warn);color:var(--warn);">📋 Generate PO (${needsOrder.length} items)</button>` : ""}
           <button class="btn primary admin-only" id="btnNInv">+ Add Item</button>
         </div>
       </div>
@@ -6778,6 +7296,7 @@ function renderInventory(root) {
     }),
   );
 
+  root.querySelector("#btnGenPO")?.addEventListener("click", () => exportPO_PDF(needsOrder));
   root.querySelector("#btnNEq")?.addEventListener("click", () => openEquipmentModal(null));
   root.querySelectorAll("[data-eeq]").forEach((btn) =>
     btn.addEventListener("click", () => {

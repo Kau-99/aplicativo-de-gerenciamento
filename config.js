@@ -16,6 +16,17 @@ export const APP = {
   lsKey: "jobcost_pro_v2",
 };
 
+/* ─── Attic Estimator Constants ─────────────────────────── */
+/* Blown-in fiberglass industry averages per 1,000 sqft */
+export const ATTIC_CALC = {
+  "R-30": { bagsPerKSqft: 22, laborHrsPerKSqft: 2.5, rValue: 30 },
+  "R-38": { bagsPerKSqft: 35, laborHrsPerKSqft: 3.5, rValue: 38 },
+  "R-49": { bagsPerKSqft: 45, laborHrsPerKSqft: 4.5, rValue: 49 },
+  "R-60": { bagsPerKSqft: 56, laborHrsPerKSqft: 5.5, rValue: 60 },
+};
+export const ATTIC_DEFAULT_BAG_COST = 45;   /* $ per bag  */
+export const ATTIC_DEFAULT_LABOR_RATE = 65; /* $ per hour */
+
 /* ─── Translations ───────────────────────────────────────── */
 export const T = {
   en: {
