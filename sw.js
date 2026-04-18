@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v22";
+const CACHE = "jobcost-v26";
 const ASSETS = [
   "./index.html",
   "./app.js",

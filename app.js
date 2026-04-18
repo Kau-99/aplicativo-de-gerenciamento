@@ -1,8 +1,4 @@
-import {
-  APP,
-  T,
-  ATTIC_DEFAULT_BAG_COST,
-} from "./config.js";
+import { APP, T, ATTIC_DEFAULT_BAG_COST } from "./config.js";
 import {
   $,
   $$,
@@ -103,9 +99,13 @@ const state = {
     wcExpiry: null,
     logoDataUrl: null,
     googleReviewUrl: "",
+    defaultTravelFee: 0,
+    travelRatePerMile: 0,
+    googleMapsApiKey: "",
   }).load(),
   mileageLogs: [],
   equipment: [],
+  pricebook: [],
   fieldSession: { active: false, data: null },
   search: "",
   sort: { col: "date", dir: "desc" },
@@ -369,6 +369,7 @@ async function init() {
       state.estimates,
       state.mileageLogs,
       state.equipment,
+      state.pricebook,
     ] = await Promise.all([
       idb.getAll(APP.stores.jobs),
       idb.getAll(APP.stores.timeLogs),
@@ -379,6 +380,7 @@ async function init() {
       idb.getAll(APP.stores.estimates),
       idb.getAll(APP.stores.mileageLogs),
       idb.getAll(APP.stores.equipment),
+      idb.getAll(APP.stores.pricebook),
     ]);
     bindUI();
     /* QR clock-in deep link: ?clockin=JOB_ID */
@@ -560,8 +562,15 @@ function bindUI() {
     const online = navigator.onLine;
     offlineEl.className = `offlineIndicator ${online ? "offlineIndicator--online" : "offlineIndicator--offline"}`;
     offlineEl.title = online ? "Online" : "Offline — changes saved locally";
-    offlineEl.setAttribute("aria-label", `Connection status: ${online ? "online" : "offline"}`);
-    if (!online) toast.warn("Offline", "No internet — the app keeps working. Data saved locally.");
+    offlineEl.setAttribute(
+      "aria-label",
+      `Connection status: ${online ? "online" : "offline"}`,
+    );
+    if (!online)
+      toast.warn(
+        "Offline",
+        "No internet — the app keeps working. Data saved locally.",
+      );
   };
   setNetworkStatus();
   window.addEventListener("online", setNetworkStatus);
@@ -836,7 +845,9 @@ function showQRModal(job) {
     const msg = document.getElementById("qrCanvasMsg");
     if (!canvas) return;
     if (!window.QRCode) {
-      if (msg) msg.textContent = "QR library not loaded. Check your connection and try again.";
+      if (msg)
+        msg.textContent =
+          "QR library not loaded. Check your connection and try again.";
       return;
     }
     QRCode.toCanvas(canvas, url, { width: 220, margin: 2 }, (err) => {
@@ -912,11 +923,16 @@ function showJobShareQR(job) {
       wrap.innerHTML = `<p class="small muted" style="color:#ff5a7a;">QR library not loaded. Check your connection and try again.</p>`;
       return;
     }
-    QRCode.toCanvas(canvas, payload, { width: 240, margin: 2, errorCorrectionLevel: "M" }, (err) => {
-      if (err) {
-        wrap.innerHTML = `<p class="small" style="color:#ff5a7a;">Job data too large for QR. Try reducing the number of cost items or shortening the notes.</p>`;
-      }
-    });
+    QRCode.toCanvas(
+      canvas,
+      payload,
+      { width: 240, margin: 2, errorCorrectionLevel: "M" },
+      (err) => {
+        if (err) {
+          wrap.innerHTML = `<p class="small" style="color:#ff5a7a;">Job data too large for QR. Try reducing the number of cost items or shortening the notes.</p>`;
+        }
+      },
+    );
   }, 80);
 
   m.querySelector("#btnDlShareQR")?.addEventListener("click", () => {
@@ -935,7 +951,10 @@ function showJobShareQR(job) {
 /* ─── QR Scanner ─────────────────────────────── */
 function openQRScanner() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    toast.warn("Camera unavailable", "Camera access requires HTTPS and a supported browser.");
+    toast.warn(
+      "Camera unavailable",
+      "Camera access requires HTTPS and a supported browser.",
+    );
     return;
   }
 
@@ -944,13 +963,20 @@ function openQRScanner() {
   let cameraTimeout = null;
 
   const stopScan = () => {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    if (cameraTimeout) { clearTimeout(cameraTimeout); cameraTimeout = null; }
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (cameraTimeout) {
+      clearTimeout(cameraTimeout);
+      cameraTimeout = null;
+    }
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
   };
 
-  const m = modal.open(`
+  const m = modal.open(
+    `
     <div class="modalHd">
       <div><h2>📷 Scan Job QR</h2><p>Point camera at a JobCost Pro Share QR code.</p></div>
       <button type="button" class="closeX" aria-label="Close">
@@ -970,7 +996,7 @@ function openQRScanner() {
   );
 
   const statusEl = document.getElementById("qrScanStatus");
-  const video    = document.getElementById("qrVideo");
+  const video = document.getElementById("qrVideo");
   const scanCanvas = document.getElementById("qrScanCanvas");
 
   const setStatus = (msg, isError = false) => {
@@ -991,12 +1017,17 @@ function openQRScanner() {
     try {
       detector = new BarcodeDetector({ formats: ["qr_code"] });
       useBarcode = true;
-    } catch { /* BarcodeDetector constructor failed — fall through to jsQR */ }
+    } catch {
+      /* BarcodeDetector constructor failed — fall through to jsQR */
+    }
   }
   const hasJsQR = typeof window.jsQR === "function";
 
   if (!useBarcode && !hasJsQR) {
-    setStatus("QR scanning library not loaded. Check your connection and try again.", true);
+    setStatus(
+      "QR scanning library not loaded. Check your connection and try again.",
+      true,
+    );
     return;
   }
 
@@ -1036,18 +1067,23 @@ function openQRScanner() {
         _importedViaQR: true,
       };
       if (state.jobs.find((j) => j.id === imported.id)) {
-        toast.info("Already exists", `"${imported.name}" is already in your jobs.`);
+        toast.info(
+          "Already exists",
+          `"${imported.name}" is already in your jobs.`,
+        );
         modal.close();
         return;
       }
-      saveJob(imported).then(() => {
-        toast.success("Job imported!", imported.name);
-        modal.close();
-        render();
-      }).catch(() => {
-        toast.error("Import failed", "Could not save the imported job.");
-        modal.close();
-      });
+      saveJob(imported)
+        .then(() => {
+          toast.success("Job imported!", imported.name);
+          modal.close();
+          render();
+        })
+        .catch(() => {
+          toast.error("Import failed", "Could not save the imported job.");
+          modal.close();
+        });
     } catch {
       toast.error("Scan error", "Could not parse QR data.");
       modal.close();
@@ -1057,7 +1093,10 @@ function openQRScanner() {
   /* ── 15-second timeout if camera never starts ── */
   cameraTimeout = setTimeout(() => {
     if (!stream) {
-      setStatus("Camera did not start. Allow camera permission and try again.", true);
+      setStatus(
+        "Camera did not start. Allow camera permission and try again.",
+        true,
+      );
     }
   }, 15000);
 
@@ -1072,9 +1111,12 @@ function openQRScanner() {
 
       const tick = async () => {
         if (!stream) return; /* modal was closed */
-        if (!video.videoWidth) { rafId = requestAnimationFrame(tick); return; }
+        if (!video.videoWidth) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
 
-        scanCanvas.width  = video.videoWidth;
+        scanCanvas.width = video.videoWidth;
         scanCanvas.height = video.videoHeight;
         const ctx = scanCanvas.getContext("2d");
         ctx.drawImage(video, 0, 0);
@@ -1082,11 +1124,24 @@ function openQRScanner() {
         try {
           if (useBarcode) {
             const results = await detector.detect(video);
-            if (results.length) { handlePayload(results[0].rawValue); return; }
+            if (results.length) {
+              handlePayload(results[0].rawValue);
+              return;
+            }
           } else {
-            const img = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-            const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-            if (code) { handlePayload(code.data); return; }
+            const img = ctx.getImageData(
+              0,
+              0,
+              scanCanvas.width,
+              scanCanvas.height,
+            );
+            const code = window.jsQR(img.data, img.width, img.height, {
+              inversionAttempts: "dontInvert",
+            });
+            if (code) {
+              handlePayload(code.data);
+              return;
+            }
           }
         } catch (err) {
           /* BarcodeDetector may fail on some frames — fall back to jsQR silently */
@@ -1100,15 +1155,18 @@ function openQRScanner() {
         rafId = requestAnimationFrame(tick);
       };
 
-      video.onloadedmetadata = () => { rafId = requestAnimationFrame(tick); };
+      video.onloadedmetadata = () => {
+        rafId = requestAnimationFrame(tick);
+      };
     })
     .catch((err) => {
       clearTimeout(cameraTimeout);
-      const msg = err?.name === "NotAllowedError"
-        ? "Camera permission denied. Allow camera access in your browser settings."
-        : err?.name === "NotFoundError"
-        ? "No camera found on this device."
-        : "Camera access failed. Try again.";
+      const msg =
+        err?.name === "NotAllowedError"
+          ? "Camera permission denied. Allow camera access in your browser settings."
+          : err?.name === "NotFoundError"
+            ? "No camera found on this device."
+            : "Camera access failed. Try again.";
       setStatus(msg, true);
     });
 }
@@ -1147,6 +1205,18 @@ async function saveEquipment(item) {
   const i = state.equipment.findIndex((x) => x.id === item.id);
   if (i !== -1) state.equipment[i] = item;
   else state.equipment.push(item);
+}
+
+async function savePricebookItem(item) {
+  await idb.put(APP.stores.pricebook, item);
+  const i = state.pricebook.findIndex((x) => x.id === item.id);
+  if (i !== -1) state.pricebook[i] = item;
+  else state.pricebook.push(item);
+}
+
+async function deletePricebookItem(id) {
+  await idb.del(APP.stores.pricebook, id);
+  state.pricebook = state.pricebook.filter((x) => x.id !== id);
 }
 
 /* ─── Push Notification helper ───────────────── */
@@ -2193,6 +2263,162 @@ function reverseGeocode(lat, lng, onResult) {
     .catch(() => {});
 }
 
+/* ─── Driving Distance via OSRM + Nominatim (free, no key) ── */
+async function calcDrivingMiles(origin, dest) {
+  const geocode = async (q) => {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&limit=1&format=json`,
+      { headers: { "Accept-Language": "en-US" } },
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d[0] ? { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) } : null;
+  };
+  const [o, d2] = await Promise.all([geocode(origin), geocode(dest)]);
+  if (!o || !d2) return null;
+  const r = await fetch(
+    `https://router.project-osrm.org/route/v1/driving/${o.lng},${o.lat};${d2.lng},${d2.lat}?overview=false`,
+  );
+  if (!r.ok) return null;
+  const data = await r.json();
+  return data.routes?.[0] ? data.routes[0].distance / 1609.344 : null;
+}
+
+/* ─── Email Estimate via mailto ───────────────────────────── */
+function emailEstimate(e) {
+  const s = state.settings;
+  const company = s.company || "King Insulation";
+  const subtotal = e.items?.length
+    ? e.items.reduce((sum, i) => sum + (i.total || 0), 0)
+    : e.value || 0;
+  const travel = e.travelFee || 0;
+  const taxAmt = (subtotal + travel) * ((e.taxRate || 0) / 100);
+  const total = subtotal + travel + taxAmt;
+  const itemLines = e.items?.length
+    ? e.items.map((i) => `  • ${i.name}${i.description ? ` (${i.description})` : ""}: ${fmt(i.total)}`).join("\n")
+    : `  ${e.insulationType || "Insulation"} — ${e.areaType || ""}${e.sqft ? ` (${e.sqft} sq ft)` : ""}`;
+  const addrLine = [e.address, e.city, e.state, e.zip].filter(Boolean).join(", ");
+  const bodyParts = [
+    `Hi ${e.client || "there"},`,
+    ``,
+    `Here is your estimate from ${company}:`,
+    `Estimate #: ${e.name || ""}`,
+    addrLine ? `Job Address: ${addrLine}` : null,
+    ``,
+    `Services:`,
+    itemLines,
+    ``,
+    `Subtotal: ${fmt(subtotal)}`,
+    travel > 0 ? `Travel Fee: ${fmt(travel)}${e.travelMiles ? ` (${e.travelMiles} mi)` : ""}` : null,
+    taxAmt > 0 ? `Tax (${e.taxRate}%): ${fmt(taxAmt)}` : null,
+    `TOTAL: ${fmt(total)}`,
+    ``,
+    e.notes ? `Notes: ${e.notes}` : null,
+    ``,
+    `This estimate is valid for 30 days. To accept, reply to this email or call us.`,
+    ``,
+    company,
+    s.companyPhone || null,
+    s.companyEmail || null,
+  ].filter((l) => l !== null).join("\n");
+  const subject = `Estimate ${e.name || ""} — ${company}`;
+  window.open(
+    `mailto:${encodeURIComponent(e.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyParts)}`,
+  );
+}
+
+/* ─── QuickBooks-compatible CSV Export ────────────────────── */
+function exportQuickBooksCSV() {
+  const jobs = state.jobs.filter((j) =>
+    ["Active", "Completed", "Invoiced"].includes(j.status),
+  );
+  if (!jobs.length) {
+    toast.warn("No data", "No active/completed/invoiced jobs to export.");
+    return;
+  }
+  const rows = [
+    ["Invoice Date", "Invoice No", "Customer", "Description", "Qty", "Unit Price", "Amount", "Tax Code", "Status", "Payment Status"],
+  ];
+  jobs.forEach((j) => {
+    const invNo = j.invoiceNumber || `${state.settings.invoicePrefix}-${j.id.slice(-6).toUpperCase()}`;
+    const date = j.date ? new Date(j.date).toLocaleDateString("en-US") : "";
+    rows.push([
+      date,
+      invNo,
+      j.client || "",
+      j.name,
+      "1",
+      (j.value || 0).toFixed(2),
+      (j.value || 0).toFixed(2),
+      "NON",
+      j.status,
+      j.paymentStatus || "Unpaid",
+    ]);
+  });
+  const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `quickbooks-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast.success("QuickBooks CSV exported", `${jobs.length} jobs ready to import.`);
+}
+
+/* ─── Address Autocomplete (Nominatim) ────────────────────── */
+function attachAddressAutocomplete(inputEl) {
+  let timer = null;
+  let dropdown = null;
+  function removeDrop() {
+    if (dropdown) { dropdown.remove(); dropdown = null; }
+  }
+  inputEl.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = inputEl.value.trim();
+    if (q.length < 5) { removeDrop(); return; }
+    timer = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&countrycodes=us&limit=5&format=json&addressdetails=1`,
+          { headers: { "Accept-Language": "en-US" } },
+        );
+        const results = await r.json();
+        removeDrop();
+        if (!results.length) return;
+        dropdown = document.createElement("div");
+        dropdown.className = "addressSuggest";
+        results.forEach((res) => {
+          const a = res.address || {};
+          const street = [a.house_number, a.road].filter(Boolean).join(" ");
+          const cityName = a.city || a.town || a.village || a.suburb || "";
+          const st = a.state_code || (a.state || "").slice(0, 2).toUpperCase();
+          const label = [street || res.display_name.split(",")[0], cityName, st, a.postcode].filter(Boolean).join(", ");
+          const item = document.createElement("div");
+          item.className = "addressSuggestItem";
+          item.textContent = label;
+          item.addEventListener("mousedown", (ev) => {
+            ev.preventDefault();
+            inputEl.value = street || res.display_name.split(",")[0].trim();
+            const parent = inputEl.closest(".modalBd");
+            const cityEl = parent?.querySelector("#eCity");
+            const stEl = parent?.querySelector("#eSt");
+            const zipEl = parent?.querySelector("#eZip");
+            if (cityEl && !cityEl.value) cityEl.value = cityName;
+            if (stEl && !stEl.value) stEl.value = st;
+            if (zipEl && !zipEl.value) zipEl.value = a.postcode || "";
+            removeDrop();
+          });
+          dropdown.appendChild(item);
+        });
+        const wrap = inputEl.parentElement;
+        wrap.style.position = "relative";
+        wrap.appendChild(dropdown);
+      } catch {}
+    }, 450);
+  });
+  inputEl.addEventListener("blur", () => setTimeout(removeDrop, 200));
+}
+
 /* Open-Meteo: free weather API, no key needed */
 function fetchWeather(lat, lng, onResult) {
   const url =
@@ -2584,6 +2810,58 @@ function exportTaxSummaryPDF(year) {
 
   doc.save(`tax_summary_${year}.pdf`);
   toast.success("Tax summary exported", `${year}`);
+}
+
+function openPricebookModal(item) {
+  const isEdit = !!item;
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>${isEdit ? "Edit Service" : "New Service"}</h2>
+        <p>${isEdit ? esc(item.name) : "Add a service to your catalog."}</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid">
+        <div class="field" style="grid-column:1/-1;">
+          <label for="pbName">Service Name *</label>
+          <input id="pbName" class="input" type="text" maxlength="120" placeholder="e.g. Attic Blown-in" value="${isEdit ? esc(item.name) : ""}"/>
+        </div>
+        <div class="field" style="grid-column:1/-1;">
+          <label for="pbDesc">Description / R-Value</label>
+          <input id="pbDesc" class="input" type="text" maxlength="200" placeholder="e.g. R-38, Fiberglass blown-in" value="${isEdit ? esc(item.description || "") : ""}"/>
+        </div>
+        <div class="field">
+          <label for="pbPrice">Default Unit Price ($)</label>
+          <input id="pbPrice" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit && item.unitPrice ? item.unitPrice : ""}"/>
+          <p class="help" style="margin-top:4px;">Auto-filled in estimate line items. Leave blank if price varies.</p>
+        </div>
+      </div>
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn" id="pbCancel">Cancel</button>
+      <button type="button" class="btn primary" id="pbSave">${isEdit ? "Save Changes" : "Add Service"}</button>
+    </div>`);
+
+  m.querySelector("#pbCancel").addEventListener("click", modal.close);
+  m.querySelector("#pbSave").addEventListener("click", () => {
+    const nameEl = m.querySelector("#pbName");
+    const name = nameEl.value.trim();
+    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
+    nameEl.classList.remove("invalid");
+    const saved = {
+      id: isEdit ? item.id : uid(),
+      name,
+      description: m.querySelector("#pbDesc").value.trim(),
+      unitPrice: parseFloat(m.querySelector("#pbPrice").value) || 0,
+    };
+    savePricebookItem(saved).then(() => {
+      toast.success(isEdit ? "Service updated" : "Service added", saved.name);
+      modal.close();
+      render();
+    });
+  });
 }
 
 function openMileageModal(entry) {
@@ -5138,6 +5416,14 @@ function renderDashboard(root) {
   ).length;
 
   const now = Date.now();
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+  const followUps = state.estimates.filter((e) => {
+    if (!["Draft", "Sent"].includes(e.status)) return false;
+    if (!e.followUpDate) return false;
+    return e.followUpDate <= todayEnd.getTime();
+  });
+
   const overdueJobs = state.jobs.filter(
     (j) =>
       j.deadline &&
@@ -5156,6 +5442,19 @@ function renderDashboard(root) {
   root.innerHTML = `
       ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
       ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;">📦 ${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
+      ${followUps.length > 0 ? `
+        <div class="followUpBanner">
+          <div class="followUpBannerTitle">🚨 Follow-ups Today: ${followUps.length} estimate${followUps.length > 1 ? "s" : ""} need${followUps.length === 1 ? "s" : ""} your attention!</div>
+          <div class="followUpList">
+            ${followUps.map((e) => `
+              <div class="followUpRow">
+                <span class="followUpClient"><strong>${esc(e.client || "—")}</strong> <span class="muted" style="font-size:12px;">${esc(e.name)}</span></span>
+                <span class="followUpVal">${fmt(estGrandTotal(e))}</span>
+                <span class="badge est-${(e.status || "draft").toLowerCase()}">${e.status}</span>
+                ${e.phone ? `<a href="tel:${esc(e.phone)}" class="btn followUpCall">📞 Call</a>` : ""}
+              </div>`).join("")}
+          </div>
+        </div>` : ""}
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
         <button class="btn" id="btnScanQR" title="Scan a Job QR code to import a job from another device">
           <svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="margin-right:5px;vertical-align:middle;" aria-hidden="true">
@@ -5856,10 +6155,14 @@ function renderBI(root) {
   const monthCostData = [];
   for (let i = 11; i >= 0; i--) {
     const d = new Date(now12.getFullYear(), now12.getMonth() - i, 1);
-    monthLabels.push(d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }));
+    monthLabels.push(
+      d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+    );
     const mJobs = state.jobs.filter((j) => {
       const jd = new Date(j.date);
-      return jd.getFullYear() === d.getFullYear() && jd.getMonth() === d.getMonth();
+      return (
+        jd.getFullYear() === d.getFullYear() && jd.getMonth() === d.getMonth()
+      );
     });
     monthRevData.push(mJobs.reduce((s, j) => s + (j.value || 0), 0));
     monthCostData.push(mJobs.reduce((s, j) => s + jobCost(j), 0));
@@ -5869,11 +6172,15 @@ function renderBI(root) {
   root.innerHTML = `
       <h2 class="pageTitle" style="margin-bottom:18px;">Analytics</h2>
       <div class="biGrid">
-        ${hasMonthlyData ? `
+        ${
+          hasMonthlyData
+            ? `
         <div class="chartWrap" style="grid-column:1/-1;">
           <h3>Monthly Revenue vs. Cost (Last 12 Months)</h3>
           <canvas id="chartMonthly"></canvas>
-        </div>` : ""}
+        </div>`
+            : ""
+        }
         <div class="chartWrap">
           <h3>Jobs by Status</h3>
           ${hasJobs ? `<canvas id="chartStatus"></canvas>` : `<div class="empty">No jobs created yet.</div>`}
@@ -5958,7 +6265,8 @@ function renderBI(root) {
             legend: { position: "top", labels: { color: textColor } },
             tooltip: {
               callbacks: {
-                label: (ctx) => ` ${ctx.dataset.label}: $${Number(ctx.raw).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+                label: (ctx) =>
+                  ` ${ctx.dataset.label}: $${Number(ctx.raw).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
               },
             },
           },
@@ -6262,6 +6570,16 @@ function renderSettings(root) {
                 <p class="help" style="margin-top:4px;">Used to estimate fuel cost per job.</p>
               </div>
               <div class="field">
+                <label for="selTravelFee">Default Travel Fee ($)</label>
+                <input id="selTravelFee" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${s.defaultTravelFee || 0}"/>
+                <p class="help" style="margin-top:4px;">Flat fee added to estimates when travel is enabled.</p>
+              </div>
+              <div class="field">
+                <label for="selTravelRate">Travel Rate ($/mile)</label>
+                <input id="selTravelRate" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${s.travelRatePerMile || 0}"/>
+                <p class="help" style="margin-top:4px;">Optional per-mile rate (enter miles in the estimate to auto-calculate).</p>
+              </div>
+              <div class="field">
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
                   <input id="selNotify" type="checkbox" ${s.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
                   <span>Enable Deadline Notifications</span>
@@ -6273,6 +6591,61 @@ function renderSettings(root) {
           </div>
         </div>
 
+        <!-- API Integrations -->
+        <div class="card">
+          <div class="cardHeader"><div class="cardTitle">API Integrations</div></div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
+            <div class="fieldGrid">
+              <div class="field" style="grid-column:1/-1;">
+                <label for="selGMapsKey">Google Maps API Key <span class="muted" style="font-weight:400;font-size:11px;">(optional — enhances distance calc)</span></label>
+                <input id="selGMapsKey" class="input" type="text" maxlength="100" placeholder="AIza..." value="${esc(s.googleMapsApiKey || "")}"/>
+                <p class="help" style="margin-top:4px;">If left blank, driving distance is calculated using free routing (OSRM). With a key, Google Maps precision is used.</p>
+              </div>
+            </div>
+            <button class="btn primary" id="btnSaveIntegrations">Save API Keys</button>
+          </div>
+        </div>
+
+        <!-- Service Catalog (Price Book) -->
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">Service Catalog (Price Book)</div>
+            <button class="btn primary" id="btnAddPBItem">＋ Add Service</button>
+          </div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:10px;">
+            <p class="help">Services listed here appear as Quick Add tags in every estimate. Click a tag to auto-fill name, description and unit price.</p>
+            ${
+              state.pricebook.length === 0
+                ? `<div class="empty" style="padding:10px 0;">No services yet. Add your first one above.</div>`
+                : `<div class="tableWrap"><table class="table">
+                  <thead><tr>
+                    <th>Service Name</th>
+                    <th>Description / R-Value</th>
+                    <th style="text-align:right;">Default Price</th>
+                    <th></th>
+                  </tr></thead>
+                  <tbody>
+                    ${state.pricebook
+                      .map(
+                        (pb) => `<tr>
+                          <td><strong>${esc(pb.name)}</strong></td>
+                          <td class="muted">${esc(pb.description || "—")}</td>
+                          <td style="text-align:right;">${pb.unitPrice ? fmt(pb.unitPrice) : `<span class="muted">—</span>`}</td>
+                          <td>
+                            <div style="display:flex;gap:4px;">
+                              <button class="btn" data-pbedit="${pb.id}" style="padding:4px 8px;font-size:11px;">Edit</button>
+                              <button class="btn danger" data-pbdel="${pb.id}" style="padding:4px 8px;font-size:11px;">Del</button>
+                            </div>
+                          </td>
+                        </tr>`,
+                      )
+                      .join("")}
+                  </tbody>
+                </table></div>`
+            }
+          </div>
+        </div>
+
         <!-- Reports -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Reports</div></div>
@@ -6281,6 +6654,7 @@ function renderSettings(root) {
               <button class="btn" id="btnTaxSummary">📊 Tax Summary</button>
               <button class="btn" id="btnSExp">⬇ JSON Backup</button>
               <button class="btn" id="btnSCSV">⬇ Export CSV</button>
+              <button class="btn" id="btnQBExport">⬇ QuickBooks CSV</button>
               <button class="btn" id="btnAllPDF">📄 Full Report PDF</button>
               <button class="btn" id="btnSImp">⬆ Import Backup</button>
               <input type="file" id="fileImport" accept=".json" style="display:none;"/>
@@ -6353,35 +6727,77 @@ function renderSettings(root) {
      num()  – keeps old value when input is blank or NaN
      date() – allows user to clear a date back to null                                  */
   function syncAllFromDOM() {
-    const g    = (id) => root.querySelector(id);
-    const str  = (id, cur) => { const el = g(id); return el ? el.value.trim() : cur; };
-    const num  = (id, cur) => { const el = g(id); const v = parseFloat(el?.value); return isNaN(v) ? cur : v; };
-    const date = (id, cur) => { const el = g(id); return el ? (parseDate(el.value) || null) : cur; };
+    const g = (id) => root.querySelector(id);
+    const str = (id, cur) => {
+      const el = g(id);
+      return el ? el.value.trim() : cur;
+    };
+    const num = (id, cur) => {
+      const el = g(id);
+      const v = parseFloat(el?.value);
+      return isNaN(v) ? cur : v;
+    };
+    const date = (id, cur) => {
+      const el = g(id);
+      return el ? parseDate(el.value) || null : cur;
+    };
 
-    state.settings.role              = g("#selRole")?.value                   ?? state.settings.role;
-    state.settings.language          = g("#selLang")?.value                   ?? state.settings.language;
-    state.settings.company           = str("#selCompany",   state.settings.company);
-    state.settings.companyPhone      = str("#selPhone",     state.settings.companyPhone);
-    state.settings.companyEmail      = str("#selEmail",     state.settings.companyEmail);
-    state.settings.companyAddress    = str("#selAddress",   state.settings.companyAddress);
-    state.settings.googleReviewUrl   = str("#selReviewUrl", state.settings.googleReviewUrl);
-    state.settings.licenseNumber     = str("#selLicNum",    state.settings.licenseNumber);
-    state.settings.licenseExpiry     = date("#selLicExp",   state.settings.licenseExpiry);
-    state.settings.glInsuranceExpiry = date("#selGLExp",    state.settings.glInsuranceExpiry);
-    state.settings.wcExpiry          = date("#selWCExp",    state.settings.wcExpiry);
-    state.settings.invoicePrefix     = str("#selInvPrefix", state.settings.invoicePrefix) || "INV";
-    state.settings.defaultMarkup     = num("#selMarkup",    state.settings.defaultMarkup);
-    state.settings.minMargin         = num("#selMinMargin", state.settings.minMargin);
-    state.settings.mileageRate       = num("#selMileage",   state.settings.mileageRate);
-    state.settings.mpg               = num("#selMPG",       state.settings.mpg);
-    state.settings.gasPrice          = num("#selGasPrice",  state.settings.gasPrice);
+    state.settings.role = g("#selRole")?.value ?? state.settings.role;
+    state.settings.language = g("#selLang")?.value ?? state.settings.language;
+    state.settings.company = str("#selCompany", state.settings.company);
+    state.settings.companyPhone = str("#selPhone", state.settings.companyPhone);
+    state.settings.companyEmail = str("#selEmail", state.settings.companyEmail);
+    state.settings.companyAddress = str(
+      "#selAddress",
+      state.settings.companyAddress,
+    );
+    state.settings.googleReviewUrl = str(
+      "#selReviewUrl",
+      state.settings.googleReviewUrl,
+    );
+    state.settings.licenseNumber = str(
+      "#selLicNum",
+      state.settings.licenseNumber,
+    );
+    state.settings.licenseExpiry = date(
+      "#selLicExp",
+      state.settings.licenseExpiry,
+    );
+    state.settings.glInsuranceExpiry = date(
+      "#selGLExp",
+      state.settings.glInsuranceExpiry,
+    );
+    state.settings.wcExpiry = date("#selWCExp", state.settings.wcExpiry);
+    state.settings.invoicePrefix =
+      str("#selInvPrefix", state.settings.invoicePrefix) || "INV";
+    state.settings.defaultMarkup = num(
+      "#selMarkup",
+      state.settings.defaultMarkup,
+    );
+    state.settings.minMargin = num("#selMinMargin", state.settings.minMargin);
+    state.settings.mileageRate = num("#selMileage", state.settings.mileageRate);
+    state.settings.mpg = num("#selMPG", state.settings.mpg);
+    state.settings.gasPrice = num("#selGasPrice", state.settings.gasPrice);
+    state.settings.defaultTravelFee = num(
+      "#selTravelFee",
+      state.settings.defaultTravelFee,
+    );
+    state.settings.travelRatePerMile = num(
+      "#selTravelRate",
+      state.settings.travelRatePerMile,
+    );
     const notifyEl = g("#selNotify");
     if (notifyEl) state.settings.notificationsEnabled = notifyEl.checked;
+    state.settings.googleMapsApiKey = str("#selGMapsKey", state.settings.googleMapsApiKey);
   }
 
   function saveSettings() {
     const ok = ls(APP.lsKey).save(state.settings);
-    if (ok === false) toast.error("Save failed", "Storage may be full. Free space and try again.");
+    if (ok === false)
+      toast.error(
+        "Save failed",
+        "Storage may be full. Free space and try again.",
+      );
     return ok !== false;
   }
 
@@ -6501,12 +6917,39 @@ function renderSettings(root) {
     ?.addEventListener("click", openTaxSummaryModal);
   root.querySelector("#btnSExp")?.addEventListener("click", doExport);
   root.querySelector("#btnSCSV")?.addEventListener("click", exportCSV);
+  root.querySelector("#btnQBExport")?.addEventListener("click", exportQuickBooksCSV);
   root.querySelector("#btnAllPDF")?.addEventListener("click", exportAllPDF);
   root
     .querySelector("#btnSImp")
     ?.addEventListener("click", () =>
       root.querySelector("#fileImport").click(),
     );
+  root.querySelector("#btnSaveIntegrations")?.addEventListener("click", () => {
+    syncAllFromDOM();
+    if (!saveSettings()) return;
+    toast.success("API keys saved", "Integration settings updated.");
+  });
+
+  /* ── Price Book ── */
+  root.querySelector("#btnAddPBItem")?.addEventListener("click", () => openPricebookModal(null));
+  root.querySelectorAll("[data-pbedit]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const item = state.pricebook.find((x) => x.id === btn.dataset.pbedit);
+      if (item) openPricebookModal(item);
+    }),
+  );
+  root.querySelectorAll("[data-pbdel]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const item = state.pricebook.find((x) => x.id === btn.dataset.pbdel);
+      if (!item) return;
+      confirm("Delete Service", item.name, "Delete", () => {
+        deletePricebookItem(item.id).then(() => {
+          toast.warn("Service deleted", item.name);
+          render();
+        });
+      });
+    }),
+  );
 
   root
     .querySelector("#btnAddMileage")
@@ -6656,8 +7099,21 @@ function shareEstimate(e) {
   const s = state.settings;
   const company = s.company || "King Insulation";
   const phone = s.companyPhone ? `\n📞 ${s.companyPhone}` : "";
-  const taxAmt = e.taxRate ? (e.value || 0) * (e.taxRate / 100) : 0;
-  const total = (e.value || 0) + taxAmt;
+  const subtotal =
+    e.items && e.items.length
+      ? e.items.reduce((sum, i) => sum + (i.total || 0), 0)
+      : e.value || 0;
+  const travel = e.travelFee || 0;
+  const taxAmt = (subtotal + travel) * ((e.taxRate || 0) / 100);
+  const total = subtotal + travel + taxAmt;
+
+  const itemLines =
+    e.items && e.items.length
+      ? e.items.map(
+          (i) =>
+            `  • ${i.name}${i.description ? ` (${i.description})` : ""}: ${fmt(i.total)}`,
+        )
+      : [];
 
   const lines = [
     `🏠 *${company} — Estimate ${e.name || ""}*`,
@@ -6667,10 +7123,15 @@ function shareEstimate(e) {
       ? `📍 ${[e.city, e.state, e.zip].filter(Boolean).join(", ")}`
       : null,
     ``,
-    `🔧 Service: ${e.insulationType || "Insulation"} — ${e.areaType || ""}${e.sqft ? ` (${e.sqft} sq ft)` : ""}`,
-    e.rValueTarget ? `📊 R-Value Target: R-${e.rValueTarget}` : null,
+    itemLines.length
+      ? `🔧 *Services:*`
+      : `🔧 Service: ${e.insulationType || "Insulation"} — ${e.areaType || ""}${e.sqft ? ` (${e.sqft} sq ft)` : ""}`,
+    ...itemLines,
     ``,
-    `💰 Subtotal: ${fmt(e.value || 0)}`,
+    `💰 Subtotal: ${fmt(subtotal)}`,
+    travel > 0
+      ? `🚗 Travel Fee: ${fmt(travel)}${e.travelMiles ? ` (${e.travelMiles} mi)` : ""}`
+      : null,
     taxAmt > 0 ? `🧾 Tax (${e.taxRate}%): ${fmt(taxAmt)}` : null,
     `✅ *Total: ${fmt(total)}*`,
     ``,
@@ -6739,6 +7200,16 @@ function openShareFallback(text) {
   });
 }
 
+/* Compute the grand total of an estimate — supports both legacy (root value) and new (items array) */
+function estGrandTotal(e) {
+  if (e.items && e.items.length) {
+    const sub = e.items.reduce((s, i) => s + (i.total || 0), 0);
+    const travel = e.travelFee || 0;
+    return (sub + travel) * (1 + (e.taxRate || 0) / 100);
+  }
+  return e.value || 0;
+}
+
 function renderEstimates(root) {
   const STATUSES = ["All", "Draft", "Sent", "Approved", "Declined"];
   const filt = state._estFilter || "All";
@@ -6772,14 +7243,16 @@ function renderEstimates(root) {
                 <td>${esc(e.client || "—")}<br><span class="small muted">${esc(e.city || "")}${e.state ? `, ${esc(e.state)}` : ""}</span></td>
                 <td>${esc(e.insulationType || "—")}</td>
                 <td>${esc(e.areaType || "—")}${e.sqft ? `<br><span class="small muted">${e.sqft} sq ft</span>` : ""}</td>
-                <td style="text-align:right;">${fmt(e.value)}</td>
+                <td style="text-align:right;">${fmt(estGrandTotal(e))}${e.items?.length ? `<br><span class="small muted">${e.items.length} item${e.items.length > 1 ? "s" : ""}</span>` : ""}</td>
                 <td>${fmtDate(e.date)}</td>
                 <td><span class="badge est-${(e.status || "draft").toLowerCase()}">${e.status || "Draft"}</span></td>
                 <td>
                   <div style="display:flex;gap:4px;flex-wrap:wrap;">
                     <button class="btn admin-only" data-ee="${e.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                    <button class="btn" data-epdf="${e.id}" style="padding:5px 9px;font-size:12px;">PDF</button>
                     <button class="btn primary admin-only" data-econvert="${e.id}" style="padding:5px 9px;font-size:12px;">→ Job</button>
                     <button class="btn" data-eshare="${e.id}" style="padding:5px 9px;font-size:12px;" title="Share via WhatsApp">📤 Share</button>
+                    <button class="btn" data-eemail="${e.id}" style="padding:5px 9px;font-size:12px;" title="Send via Email">📧 Email</button>
                     <button class="btn danger admin-only" data-edel="${e.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
                   </div>
                 </td>
@@ -6805,10 +7278,23 @@ function renderEstimates(root) {
       if (e) openEstimateModal(e);
     }),
   );
+  root.querySelectorAll("[data-epdf]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const e = state.estimates.find((x) => x.id === btn.dataset.epdf);
+      if (e) exportEstimatePDF(e);
+    }),
+  );
   root.querySelectorAll("[data-econvert]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const e = state.estimates.find((x) => x.id === btn.dataset.econvert);
       if (!e) return;
+      const jobCosts = (e.items || []).map((i) => ({
+        id: uid(),
+        description: i.name + (i.description ? ` — ${i.description}` : ""),
+        qty: i.qty,
+        unitCost: i.unitPrice,
+        category: "Labor",
+      }));
       const job = {
         id: uid(),
         name: e.client
@@ -6816,7 +7302,7 @@ function renderEstimates(root) {
           : e.name || "New Job",
         client: e.client || "",
         status: "Draft",
-        value: e.value || 0,
+        value: estGrandTotal(e),
         insulationType: e.insulationType || "",
         areaType: e.areaType || "",
         sqft: e.sqft || null,
@@ -6827,7 +7313,7 @@ function renderEstimates(root) {
         notes: e.notes || "",
         taxRate: e.taxRate || 0,
         date: Date.now(),
-        costs: [],
+        costs: jobCosts,
         photos: [],
         tags: [],
         paymentStatus: "Unpaid",
@@ -6863,9 +7349,15 @@ function renderEstimates(root) {
       if (e) shareEstimate(e);
     }),
   );
+  root.querySelectorAll("[data-eemail]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const e = state.estimates.find((x) => x.id === btn.dataset.eemail);
+      if (e) emailEstimate(e);
+    }),
+  );
 }
 
-function openAtticCalcModal(estimateModalEl) {
+function openAtticCalcModal(estimateModalEl, onApply) {
   const currentSqft = estimateModalEl.querySelector("#eSqft")?.value || "";
   const markup = state.settings.defaultMarkup || 0;
   const defaultBagCost = ATTIC_DEFAULT_BAG_COST;
@@ -6902,8 +7394,10 @@ function openAtticCalcModal(estimateModalEl) {
   function runCalc() {
     const sqft = parseFloat(calcModal.querySelector("#aeSqft").value);
     const coverage = parseFloat(calcModal.querySelector("#aeCoverage").value);
-    const bagCost = parseFloat(calcModal.querySelector("#acBagCost").value) || defaultBagCost;
-    const laborRatePerSqft = parseFloat(calcModal.querySelector("#aeLaborRate").value) || 0;
+    const bagCost =
+      parseFloat(calcModal.querySelector("#acBagCost").value) || defaultBagCost;
+    const laborRatePerSqft =
+      parseFloat(calcModal.querySelector("#aeLaborRate").value) || 0;
     if (!sqft || sqft <= 0 || !coverage || coverage <= 0) return null;
 
     const bags = Math.ceil(sqft / coverage);
@@ -6911,7 +7405,18 @@ function openAtticCalcModal(estimateModalEl) {
     const totalLabor = sqft * laborRatePerSqft;
     const subtotal = matCost + totalLabor;
     const total = +(subtotal * (1 + markup / 100)).toFixed(2);
-    return { sqft, coverage, bags, bagCost, matCost, laborRatePerSqft, totalLabor, subtotal, total, markup };
+    return {
+      sqft,
+      coverage,
+      bags,
+      bagCost,
+      matCost,
+      laborRatePerSqft,
+      totalLabor,
+      subtotal,
+      total,
+      markup,
+    };
   }
 
   calcModal.querySelector("#acPreviewBtn").addEventListener("click", () => {
@@ -6941,30 +7446,47 @@ function openAtticCalcModal(estimateModalEl) {
   calcModal.querySelector("#acApply").addEventListener("click", () => {
     if (!calcResult) return;
     const r = calcResult;
-    const sqftEl = estimateModalEl.querySelector("#eSqft");
-    const valEl  = estimateModalEl.querySelector("#eVal");
-    const notesEl = estimateModalEl.querySelector("#eNotes");
-    const itEl   = estimateModalEl.querySelector("#eIT");
-    const atEl   = estimateModalEl.querySelector("#eAT");
-    if (sqftEl) sqftEl.value = r.sqft;
-    if (valEl)  valEl.value  = r.total.toFixed(2);
+    /* Populate sqft / type fields on parent modal if present */
+    const sqftEl = estimateModalEl?.querySelector("#eSqft");
+    const itEl = estimateModalEl?.querySelector("#eIT");
+    const atEl = estimateModalEl?.querySelector("#eAT");
+    if (sqftEl && !sqftEl.value) sqftEl.value = r.sqft;
     if (itEl && !itEl.value) itEl.value = "Blown-in Fiberglass";
     if (atEl && !atEl.value) atEl.value = "Attic";
-    const breakdown = [
-      `Smart Calc: ${r.sqft} sqft @ ${r.coverage} sqft/bag`,
-      `• Material: ${r.bags} bags × ${fmt(r.bagCost)}/bag = ${fmt(r.matCost)}`,
-      `• Labor: ${r.sqft} sqft × $${r.laborRatePerSqft.toFixed(2)}/sqft = ${fmt(r.totalLabor)}`,
-      r.markup > 0 ? `• Markup (${r.markup}%): ${fmt(r.total - r.subtotal)}` : null,
-      `• Total: ${fmt(r.total)}`,
-    ].filter(Boolean).join("\n");
-    if (notesEl) notesEl.value = notesEl.value ? notesEl.value + "\n\n" + breakdown : breakdown;
+    /* Build line items and push via callback (Sprint 24) */
+    const matItem = {
+      id: uid(),
+      name: "Attic Material",
+      description: `${r.bags} bags × ${r.coverage} sqft/bag @ ${fmt(r.bagCost)}/bag`,
+      qty: r.bags,
+      unitPrice: +r.bagCost.toFixed(2),
+      total: +r.matCost.toFixed(2),
+    };
+    const laborItem =
+      r.totalLabor > 0
+        ? {
+            id: uid(),
+            name: "Attic Labor",
+            description: `${r.sqft} sqft × $${r.laborRatePerSqft.toFixed(2)}/sqft`,
+            qty: r.sqft,
+            unitPrice: +r.laborRatePerSqft.toFixed(4),
+            total: +r.totalLabor.toFixed(2),
+          }
+        : null;
     modal.close();
-    toast.success("Smart Calc applied", `${r.bags} bags · Labor ${fmt(r.totalLabor)} · Total ${fmt(r.total)}`);
+    if (typeof onApply === "function") {
+      onApply(matItem, laborItem);
+    }
+    toast.success(
+      "Smart Calc applied",
+      `${r.bags} bags · Labor ${fmt(r.totalLabor)} · added to estimate`,
+    );
   });
 }
 
 function openEstimateModal(est) {
   const isEdit = !!est;
+  const EST_STATUS = ["Draft", "Sent", "Approved", "Declined"];
   const INST = [
     "Blown-in Fiberglass",
     "Blown-in Cellulose",
@@ -6983,65 +7505,215 @@ function openEstimateModal(est) {
     "New Construction",
     "Other",
   ];
-  const EST_STATUS = ["Draft", "Sent", "Approved", "Declined"];
+
+  /* ── Working line-items array (mutable in closure) ── */
+  let lineItems =
+    est?.items && est.items.length ? est.items.map((i) => ({ ...i })) : [];
+
+  /* ── Signature captured in this editing session ── */
+  let pendingSignature = isEdit ? (est.signature || null) : null;
+
+  function computeSubtotal() {
+    return lineItems.reduce((s, i) => s + (i.total || 0), 0);
+  }
+
+  function getTravelFeeValue() {
+    const toggle = m.querySelector("#eTravelToggle");
+    if (!toggle?.checked) return 0;
+    const miles = parseFloat(m.querySelector("#eTravelMiles")?.value) || 0;
+    const ratePerMile = state.settings.travelRatePerMile || 0;
+    if (miles > 0 && ratePerMile > 0) return +(miles * ratePerMile).toFixed(2);
+    return parseFloat(m.querySelector("#eTravelFee")?.value) || 0;
+  }
+
+  function renderLineItems() {
+    const taxRate = parseFloat(m.querySelector("#eTax")?.value) || 0;
+    const subtotal = computeSubtotal();
+    const travel = getTravelFeeValue();
+    const taxBase = subtotal + travel;
+    const taxAmt = taxBase * (taxRate / 100);
+    const grand = taxBase + taxAmt;
+
+    const tbody = m.querySelector("#eLineItemsBody");
+    if (tbody) {
+      tbody.innerHTML =
+        lineItems.length === 0
+          ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:12px 0;">No items yet. Add one above.</td></tr>`
+          : lineItems
+              .map(
+                (item, idx) => `
+            <tr>
+              <td><strong>${esc(item.name)}</strong>${item.description ? `<br><span class="small muted">${esc(item.description)}</span>` : ""}</td>
+              <td style="text-align:right;">${item.qty}</td>
+              <td style="text-align:right;">${fmt(item.unitPrice)}</td>
+              <td style="text-align:right;"><strong>${fmt(item.total)}</strong></td>
+              <td style="text-align:center;">
+                <button type="button" class="btn danger" data-eli="${idx}" style="padding:3px 8px;font-size:12px;" aria-label="Remove item">🗑</button>
+              </td>
+            </tr>`,
+              )
+              .join("");
+
+      tbody.querySelectorAll("[data-eli]").forEach((btn) =>
+        btn.addEventListener("click", () => {
+          lineItems.splice(parseInt(btn.dataset.eli), 1);
+          renderLineItems();
+        }),
+      );
+    }
+    const subEl = m.querySelector("#eSubtotal");
+    const grandEl = m.querySelector("#eGrandTotal");
+    const travelRow = m.querySelector("#eTravelFeeRow");
+    const travelAmtEl = m.querySelector("#eTravelFeeAmt");
+    if (subEl) subEl.textContent = fmt(subtotal);
+    if (grandEl) grandEl.textContent = fmt(grand);
+    if (travelRow) travelRow.style.display = travel > 0 ? "" : "none";
+    if (travelAmtEl) travelAmtEl.textContent = fmt(travel);
+  }
 
   const m = modal.open(`
-      <div class="modalHd">
-        <div><h2>${isEdit ? "Edit Estimate" : "New Estimate"}</h2>
-          <p>${isEdit ? esc(est.name) : "Create a quote to send to a client."}</p></div>
-        <button type="button" class="closeX" aria-label="Close">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-        </button>
-      </div>
-      <div class="modalBd">
-        <div class="fieldGrid">
-          <div class="field"><label for="eCl">Client Name *</label>
-            <input id="eCl" class="input" type="text" maxlength="120" placeholder="e.g. John Smith" value="${isEdit ? esc(est.client || "") : ""}"/></div>
-          <div class="field"><label for="ePh">Phone</label>
-            <input id="ePh" class="input" type="tel" maxlength="30" placeholder="(555) 123-4567" value="${isEdit ? esc(est.phone || "") : ""}"/></div>
-          <div class="field"><label for="eEm">Email</label>
-            <input id="eEm" class="input" type="email" maxlength="120" placeholder="client@email.com" value="${isEdit ? esc(est.email || "") : ""}"/></div>
-          <div class="field"><label for="eAddr">Address</label>
-            <input id="eAddr" class="input" type="text" maxlength="200" placeholder="Street address" value="${isEdit ? esc(est.address || "") : ""}"/></div>
-          <div class="field"><label for="eZip">ZIP</label>
-            <input id="eZip" class="input" type="text" maxlength="10" placeholder="e.g. 33101" value="${isEdit ? esc(est.zip || "") : ""}"/></div>
-          <div class="field"><label for="eCity">City</label>
-            <input id="eCity" class="input" type="text" maxlength="80" placeholder="Miami" value="${isEdit ? esc(est.city || "") : ""}"/></div>
-          <div class="field"><label for="eSt">State</label>
-            <input id="eSt" class="input" type="text" maxlength="10" placeholder="FL" value="${isEdit ? esc(est.state || "FL") : "FL"}"/></div>
-          <div class="field"><label for="eIT">Insulation Type</label>
-            <select id="eIT"><option value="">— Select —</option>
-              ${INST.map((s) => `<option value="${s}" ${isEdit && est.insulationType === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select></div>
-          <div class="field"><label for="eAT">Area Type</label>
-            <select id="eAT"><option value="">— Select —</option>
-              ${AREAS.map((s) => `<option value="${s}" ${isEdit && est.areaType === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select></div>
-          <div class="field"><label for="eSqft">Square Footage</label>
-            <input id="eSqft" class="input" type="number" min="0" step="1" placeholder="e.g. 1200" value="${isEdit ? est.sqft || "" : ""}"/></div>
-          <div class="field"><label for="eRVT">R-Value Target</label>
-            <input id="eRVT" class="input" type="number" min="0" step="1" placeholder="e.g. 38" value="${isEdit ? est.rValueTarget || "" : ""}"/></div>
-          <div class="field"><label for="eVal">Estimated Value ($)</label>
-            <input id="eVal" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? est.value || "" : ""}"/></div>
-          <div class="field"><label for="eTax">Tax Rate (%)</label>
-            <input id="eTax" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit ? est.taxRate || 0 : 0}"/></div>
-          <div class="field"><label for="eStatus">Status</label>
-            <select id="eStatus">
-              ${EST_STATUS.map((s) => `<option value="${s}" ${isEdit && est.status === s ? "selected" : ""}>${s}</option>`).join("")}
-            </select></div>
-          <div class="field" style="grid-column:1/-1;"><label for="eNotes">Notes</label>
-            <textarea id="eNotes" placeholder="Scope of work, special requirements…">${isEdit ? esc(est.notes || "") : ""}</textarea></div>
+    <div class="modalHd">
+      <div><h2>${isEdit ? "Edit Estimate" : "New Estimate"}</h2>
+        <p>${isEdit ? esc(est.name) : "Create a quote to send to a client."}</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd">
+
+      <div class="sectionLabel" style="margin-bottom:10px;">Client &amp; Job Info</div>
+      <div class="fieldGrid">
+        <div class="field"><label for="eCl">Client Name *</label>
+          <input id="eCl" class="input" type="text" maxlength="120" placeholder="e.g. John Smith" value="${isEdit ? esc(est.client || "") : ""}"/></div>
+        <div class="field"><label for="ePh">Phone</label>
+          <input id="ePh" class="input" type="tel" maxlength="30" placeholder="(555) 123-4567" value="${isEdit ? esc(est.phone || "") : ""}"/></div>
+        <div class="field"><label for="eEm">Email</label>
+          <input id="eEm" class="input" type="email" maxlength="120" placeholder="client@email.com" value="${isEdit ? esc(est.email || "") : ""}"/></div>
+        <div class="field"><label for="eAddr">Address</label>
+          <input id="eAddr" class="input" type="text" maxlength="200" placeholder="Street address" value="${isEdit ? esc(est.address || "") : ""}"/></div>
+        <div class="field"><label for="eZip">ZIP</label>
+          <input id="eZip" class="input" type="text" maxlength="10" placeholder="e.g. 33101" value="${isEdit ? esc(est.zip || "") : ""}"/></div>
+        <div class="field"><label for="eCity">City</label>
+          <input id="eCity" class="input" type="text" maxlength="80" placeholder="Miami" value="${isEdit ? esc(est.city || "") : ""}"/></div>
+        <div class="field"><label for="eSt">State</label>
+          <input id="eSt" class="input" type="text" maxlength="10" placeholder="FL" value="${isEdit ? esc(est.state || "FL") : "FL"}"/></div>
+        <div class="field"><label for="eIT">Insulation Type</label>
+          <select id="eIT"><option value="">— Select —</option>
+            ${INST.map((s) => `<option value="${s}" ${isEdit && est.insulationType === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select></div>
+        <div class="field"><label for="eAT">Area Type</label>
+          <select id="eAT"><option value="">— Select —</option>
+            ${AREAS.map((s) => `<option value="${s}" ${isEdit && est.areaType === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select></div>
+        <div class="field"><label for="eSqft">Square Footage</label>
+          <input id="eSqft" class="input" type="number" min="0" step="1" placeholder="e.g. 1200" value="${isEdit ? est.sqft || "" : ""}"/></div>
+        <div class="field"><label for="eTax">Tax Rate (%)</label>
+          <input id="eTax" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit ? est.taxRate || 0 : 0}"/></div>
+        <div class="field"><label for="eStatus">Status</label>
+          <select id="eStatus">
+            ${EST_STATUS.map((s) => `<option value="${s}" ${isEdit && est.status === s ? "selected" : ""}>${s}</option>`).join("")}
+          </select></div>
+        <div class="field" style="grid-column:1/-1;"><label for="eNotes">Notes</label>
+          <textarea id="eNotes" placeholder="Scope of work, special requirements…">${isEdit ? esc(est.notes || "") : ""}</textarea></div>
+        <div class="field">
+          <label for="eFollowUp">Follow-up Date</label>
+          <input id="eFollowUp" class="input" type="date" value="${isEdit && est.followUpDate ? fmtDateInput(est.followUpDate) : ""}"/>
+          <p class="help" style="margin-top:4px;">Set a reminder to follow up with this client.</p>
         </div>
       </div>
-      <div class="modalFt">
-        <button type="button" class="btn" id="eCancel">Cancel</button>
-        <button type="button" class="btn" id="eBtnAttic">🏠 Smart Calc: Attic</button>
-        <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
-      </div>`);
 
-  m.querySelector("#eBtnAttic").addEventListener("click", () =>
-    openAtticCalcModal(m),
-  );
+      <div class="sectionLabel" style="margin:20px 0 8px;">Add Line Item</div>
+      <div class="quickAddTags" id="eQuickTags"></div>
+      <div class="fieldGrid" style="margin-top:8px;">
+        <div class="field"><label for="eLIName">Service / Material *</label>
+          <input id="eLIName" class="input" type="text" maxlength="120" placeholder="e.g. Attic Blown-in"/></div>
+        <div class="field"><label for="eLIDesc">Description</label>
+          <input id="eLIDesc" class="input" type="text" maxlength="200" placeholder="e.g. R-38, 1 200 sqft"/></div>
+        <div class="field"><label for="eLIQty">Qty</label>
+          <input id="eLIQty" class="input" type="number" min="0" step="0.01" placeholder="1" value="1"/></div>
+        <div class="field"><label for="eLIPrice">Unit Price ($)</label>
+          <input id="eLIPrice" class="input" type="number" min="0" step="0.01" placeholder="0.00"/></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;">➕ Add Line Item</button>
+        <button type="button" class="btn" id="eBtnAttic">🏠 Smart Calc</button>
+      </div>
+
+      <div style="margin-top:16px;">
+        <table class="table" style="font-size:13px;">
+          <thead><tr>
+            <th>Service / Material</th>
+            <th style="text-align:right;width:60px;">Qty</th>
+            <th style="text-align:right;width:90px;">Unit Price</th>
+            <th style="text-align:right;width:90px;">Total</th>
+            <th style="width:36px;"></th>
+          </tr></thead>
+          <tbody id="eLineItemsBody"></tbody>
+        </table>
+      </div>
+
+      <div class="travelSection" style="margin-top:16px;padding:12px 14px;background:var(--panel2);border-radius:10px;">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:0;">
+          <input type="checkbox" id="eTravelToggle" style="width:18px;height:18px;cursor:pointer;"
+            ${isEdit && est.travelFee ? "checked" : ""}/>
+          <span style="font-weight:600;font-size:13px;">Add Travel &amp; Logistics Fee</span>
+        </label>
+        <div id="eTravelInputWrap" style="margin-top:10px;display:${isEdit && est.travelFee ? "block" : "none"};">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div class="field" style="flex:1;min-width:160px;margin:0;">
+              <label for="eTravelFee" style="font-size:12px;">Fee Amount ($)</label>
+              <input id="eTravelFee" class="input" type="number" min="0" step="0.01" placeholder="0.00"
+                value="${isEdit && est.travelFee ? est.travelFee : state.settings.defaultTravelFee || 0}"/>
+            </div>
+            <div class="field" style="flex:1;min-width:160px;margin:0;">
+              <label for="eTravelMiles" style="font-size:12px;">Miles (optional — auto-calc)</label>
+              <input id="eTravelMiles" class="input" type="number" min="0" step="0.1" placeholder="e.g. 25"
+                value="${isEdit && est.travelMiles ? est.travelMiles : ""}"/>
+            </div>
+          </div>
+          <p class="help" style="margin-top:6px;">If you enter miles, the fee is calculated as miles × Travel Rate ($/mile) from Settings. Otherwise the flat fee is used.</p>
+          <button type="button" class="btn" id="eBtnCalcDist" style="margin-top:8px;width:100%;font-size:12px;">🗺 Auto-Calculate Driving Miles</button>
+        </div>
+      </div>
+
+      <div class="estTotals">
+        <div class="estTotalsRow"><span class="muted">Subtotal (services)</span><strong id="eSubtotal">${fmt(0)}</strong></div>
+        <div class="estTotalsRow" id="eTravelFeeRow" style="display:none;"><span class="muted">Travel &amp; Logistics</span><strong id="eTravelFeeAmt">${fmt(0)}</strong></div>
+        <div class="estTotalsRow estTotalsGrand"><span>Grand Total</span><strong id="eGrandTotal">${fmt(0)}</strong></div>
+      </div>
+
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn" id="eCancel">Cancel</button>
+      ${!isEdit || (est.status !== "Approved") ? `<button type="button" class="btn" id="eBtnSign" style="background:var(--primary);color:#fff;font-weight:600;">✍️ Sign &amp; Approve</button>` : `<span class="badge est-approved" style="align-self:center;">✅ Signed</span>`}
+      <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
+    </div>`);
+
+  /* Initial render of items + totals */
+  renderLineItems();
+
+  /* Quick-add tags — driven by state.pricebook */
+  const tagsContainer = m.querySelector("#eQuickTags");
+  if (tagsContainer) {
+    if (state.pricebook.length === 0) {
+      tagsContainer.innerHTML = `<span class="muted" style="font-size:12px;">No services in your catalog yet. Go to Settings → Service Catalog to add some.</span>`;
+    } else {
+      tagsContainer.innerHTML = state.pricebook
+        .map((svc, i) => `<button type="button" class="quickTag" data-qi="${i}">${esc(svc.name)}</button>`)
+        .join("");
+      tagsContainer.querySelectorAll(".quickTag").forEach((btn) =>
+        btn.addEventListener("click", () => {
+          const svc = state.pricebook[parseInt(btn.dataset.qi)];
+          m.querySelector("#eLIName").value = svc.name;
+          m.querySelector("#eLIDesc").value = svc.description || "";
+          if (svc.unitPrice) m.querySelector("#eLIPrice").value = svc.unitPrice.toFixed(2);
+          m.querySelector("#eLIQty").focus();
+        }),
+      );
+    }
+  }
+
+  /* ZIP lookup */
   m.querySelector("#eZip")?.addEventListener("blur", () => {
     lookupZIP(m.querySelector("#eZip").value, (city, st) => {
       if (!m.querySelector("#eCity").value)
@@ -7049,7 +7721,186 @@ function openEstimateModal(est) {
       if (!m.querySelector("#eSt").value) m.querySelector("#eSt").value = st;
     });
   });
+
+  /* Tax rate change → re-render totals */
+  m.querySelector("#eTax")?.addEventListener("input", renderLineItems);
+
+  /* Travel toggle */
+  m.querySelector("#eTravelToggle")?.addEventListener("change", (e) => {
+    const wrap = m.querySelector("#eTravelInputWrap");
+    if (wrap) wrap.style.display = e.target.checked ? "block" : "none";
+    renderLineItems();
+  });
+  /* Travel fee / miles change → re-render totals */
+  m.querySelector("#eTravelFee")?.addEventListener("input", renderLineItems);
+  m.querySelector("#eTravelMiles")?.addEventListener("input", () => {
+    const miles = parseFloat(m.querySelector("#eTravelMiles").value) || 0;
+    const rate = state.settings.travelRatePerMile || 0;
+    if (miles > 0 && rate > 0) {
+      const feeEl = m.querySelector("#eTravelFee");
+      if (feeEl) feeEl.value = (miles * rate).toFixed(2);
+    }
+    renderLineItems();
+  });
+
+  /* Distance calculator */
+  m.querySelector("#eBtnCalcDist")?.addEventListener("click", async () => {
+    const origin = state.settings.companyAddress;
+    if (!origin) {
+      toast.warn("No origin address", "Set your Company Address in Settings first.");
+      return;
+    }
+    const addr = m.querySelector("#eAddr")?.value.trim() || "";
+    const city = m.querySelector("#eCity")?.value.trim() || "";
+    const st = m.querySelector("#eSt")?.value.trim() || "";
+    const zip = m.querySelector("#eZip")?.value.trim() || "";
+    const dest = [addr, city, st, zip].filter(Boolean).join(", ");
+    if (!dest) {
+      toast.warn("No destination", "Fill in the client address fields first.");
+      return;
+    }
+    const btn = m.querySelector("#eBtnCalcDist");
+    btn.textContent = "⌛ Calculating…";
+    btn.disabled = true;
+    try {
+      const miles = await calcDrivingMiles(origin, dest);
+      if (miles != null) {
+        const milesEl = m.querySelector("#eTravelMiles");
+        if (milesEl) {
+          milesEl.value = miles.toFixed(1);
+          milesEl.dispatchEvent(new Event("input"));
+        }
+        toast.success("Distance calculated", `${miles.toFixed(1)} miles driving`);
+      } else {
+        toast.warn("Calculation failed", "Could not find one of the addresses. Check spelling.");
+      }
+    } catch {
+      toast.warn("Calculation failed", "Check your internet connection.");
+    } finally {
+      btn.textContent = "🗺 Auto-Calculate Driving Miles";
+      btn.disabled = false;
+    }
+  });
+
+  /* Address autocomplete on street address field */
+  const eAddrEl = m.querySelector("#eAddr");
+  if (eAddrEl) attachAddressAutocomplete(eAddrEl);
+
+  /* Add line item button */
+  m.querySelector("#eBtnAddItem").addEventListener("click", () => {
+    const nameEl = m.querySelector("#eLIName");
+    const descEl = m.querySelector("#eLIDesc");
+    const qtyEl = m.querySelector("#eLIQty");
+    const priceEl = m.querySelector("#eLIPrice");
+    const name = nameEl.value.trim();
+    const qty = parseFloat(qtyEl.value) || 1;
+    const unitPrice = parseFloat(priceEl.value) || 0;
+    if (!name) {
+      nameEl.classList.add("invalid");
+      nameEl.focus();
+      return;
+    }
+    nameEl.classList.remove("invalid");
+    lineItems.push({
+      id: uid(),
+      name,
+      description: descEl.value.trim(),
+      qty,
+      unitPrice,
+      total: +(qty * unitPrice).toFixed(2),
+    });
+    nameEl.value = "";
+    descEl.value = "";
+    qtyEl.value = "1";
+    priceEl.value = "";
+    renderLineItems();
+  });
+
+  /* Smart Calc: push returned items directly into lineItems */
+  m.querySelector("#eBtnAttic").addEventListener("click", () =>
+    openAtticCalcModal(m, (matItem, laborItem) => {
+      lineItems.push(matItem);
+      if (laborItem) lineItems.push(laborItem);
+      renderLineItems();
+    }),
+  );
+
   m.querySelector("#eCancel").addEventListener("click", modal.close);
+
+  /* ── Sign & Approve ── */
+  m.querySelector("#eBtnSign")?.addEventListener("click", () => {
+    const signModal = modal.open(`
+      <div class="modalHd">
+        <div><h2>✍️ Customer Signature</h2>
+          <p>Sign below to approve this estimate.</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+        <canvas id="sigCanvas" width="480" height="200"
+          style="border:2px solid var(--border);border-radius:10px;background:#fff;touch-action:none;cursor:crosshair;max-width:100%;"></canvas>
+        <p class="help" style="text-align:center;">Draw your signature above.</p>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="sigClear">🗑 Clear</button>
+        <button type="button" class="btn" id="sigCancel">Cancel</button>
+        <button type="button" class="btn primary" id="sigSave">✅ Confirm Signature</button>
+      </div>`);
+
+    const canvas = signModal.querySelector("#sigCanvas");
+    const ctx = canvas.getContext("2d");
+    ctx.strokeStyle = "#14285a";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    let drawing = false;
+
+    /* Prefill existing signature if re-signing */
+    if (pendingSignature) {
+      const img = new Image();
+      img.onload = () => ctx.drawImage(img, 0, 0);
+      img.src = pendingSignature;
+    }
+
+    const getPos = (e) => {
+      const r = canvas.getBoundingClientRect();
+      const src = e.touches ? e.touches[0] : e;
+      return { x: (src.clientX - r.left) * (canvas.width / r.width), y: (src.clientY - r.top) * (canvas.height / r.height) };
+    };
+    const start = (e) => { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+    const move  = (e) => { e.preventDefault(); if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+    const end   = (e) => { e.preventDefault(); drawing = false; };
+
+    canvas.addEventListener("mousedown",  start);
+    canvas.addEventListener("mousemove",  move);
+    canvas.addEventListener("mouseup",    end);
+    canvas.addEventListener("mouseleave", end);
+    canvas.addEventListener("touchstart", start, { passive: false });
+    canvas.addEventListener("touchmove",  move,  { passive: false });
+    canvas.addEventListener("touchend",   end,   { passive: false });
+
+    signModal.querySelector("#sigClear").addEventListener("click", () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+    signModal.querySelector("#sigCancel").addEventListener("click", modal.close);
+    signModal.querySelector("#sigSave").addEventListener("click", () => {
+      /* Check canvas is not blank */
+      const px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const hasInk = px.some((v, i) => i % 4 === 3 && v > 0);
+      if (!hasInk) {
+        toast.warn("Empty signature", "Please sign before confirming.");
+        return;
+      }
+      pendingSignature = canvas.toDataURL("image/png");
+      /* Set status to Approved in the parent modal */
+      const statusEl = m.querySelector("#eStatus");
+      if (statusEl) statusEl.value = "Approved";
+      modal.close();
+      toast.success("Signature captured", "Status set to Approved.");
+    });
+  });
+
   m.querySelector("#eSave").addEventListener("click", () => {
     const clEl = m.querySelector("#eCl");
     if (!clEl.value.trim()) {
@@ -7058,6 +7909,8 @@ function openEstimateModal(est) {
       return;
     }
     clEl.classList.remove("invalid");
+    const taxRate = parseFloat(m.querySelector("#eTax").value) || 0;
+    const subtotal = computeSubtotal();
     const saved = {
       id: isEdit ? est.id : uid(),
       name: isEdit ? est.name : getNextEstimateNumber(),
@@ -7071,13 +7924,19 @@ function openEstimateModal(est) {
       insulationType: m.querySelector("#eIT").value,
       areaType: m.querySelector("#eAT").value,
       sqft: parseFloat(m.querySelector("#eSqft").value) || null,
-      rValueTarget: parseFloat(m.querySelector("#eRVT").value) || null,
-      value: parseFloat(m.querySelector("#eVal").value) || 0,
-      taxRate: parseFloat(m.querySelector("#eTax").value) || 0,
+      taxRate,
       status: m.querySelector("#eStatus").value,
       notes: m.querySelector("#eNotes").value.trim(),
       date: isEdit ? est.date : Date.now(),
       sentDate: isEdit ? est.sentDate : null,
+      items: lineItems,
+      travelFee: getTravelFeeValue(),
+      travelMiles: parseFloat(m.querySelector("#eTravelMiles")?.value) || 0,
+      value: +((subtotal + getTravelFeeValue()) * (1 + taxRate / 100)).toFixed(
+        2,
+      ),
+      signature: pendingSignature || null,
+      followUpDate: parseDate(m.querySelector("#eFollowUp")?.value) || null,
     };
     saveEstimate(saved)
       .then(() => {
@@ -7090,6 +7949,229 @@ function openEstimateModal(est) {
       })
       .catch(() => toast.error("Save error", "Could not save estimate."));
   });
+}
+
+/* ─── PDF: Estimate ─────────────────────────── */
+function exportEstimatePDF(est) {
+  if (!window.jspdf) {
+    toast.error("PDF Error", "jsPDF not loaded.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const lm = 14,
+    rr = 196;
+  let y = 18;
+  const s = state.settings;
+
+  /* Items with fallback for old estimates (no items array) */
+  const items =
+    est.items && est.items.length
+      ? est.items
+      : est.value
+        ? [
+            {
+              id: "legacy",
+              name: "Services rendered",
+              description: "",
+              qty: 1,
+              unitPrice: est.value,
+              total: est.value,
+            },
+          ]
+        : [];
+  const subtotal = items.reduce((sum, i) => sum + (i.total || 0), 0);
+  const taxRate = est.taxRate || 0;
+  /* taxAmt and grand are computed after travel fee is known (see totals block) */
+
+  /* ── Header bar ── */
+  doc.setFillColor(20, 40, 90);
+  doc.rect(0, 0, 210, 36, "F");
+  if (s.logoDataUrl) {
+    try {
+      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
+    } catch {}
+  }
+  const hx = s.logoDataUrl ? lm + 32 : lm;
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text("ESTIMATE", hx, y);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  if (s.company) doc.text(s.company, hx, y + 7);
+  if (s.companyAddress) doc.text(s.companyAddress, hx, y + 13);
+  if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, hx, y + 19);
+  if (s.licenseNumber)
+    doc.text(`Lic: ${s.licenseNumber}`, rr, y + 6, { align: "right" });
+  doc.setTextColor(0);
+  y = 46;
+
+  /* ── Estimate meta ── */
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+  doc.text(`Estimate #: ${est.name || "—"}`, rr, y + 7, { align: "right" });
+  if (est.insulationType || est.areaType)
+    doc.text(
+      `${est.insulationType || ""}${est.areaType ? ` — ${est.areaType}` : ""}`,
+      rr,
+      y + 14,
+      { align: "right" },
+    );
+  doc.setFont("helvetica", "normal");
+
+  /* ── Bill To ── */
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.text("Prepared For:", lm, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(est.client || "—", lm, y + 7);
+  if (est.address) doc.text(est.address, lm, y + 13);
+  if (est.city || est.state)
+    doc.text(
+      [est.city, est.state, est.zip].filter(Boolean).join(", "),
+      lm,
+      y + 19,
+    );
+  y += 32;
+
+  doc.setDrawColor(180, 185, 200);
+  doc.line(lm, y, rr, y);
+  y += 8;
+
+  /* ── Items table header ── */
+  doc.setFontSize(9);
+  doc.setFillColor(20, 30, 55);
+  doc.rect(lm, y - 5, 182, 7, "F");
+  doc.setTextColor(200, 210, 230);
+  const cols = [lm + 1, 100, 130, 155, 176];
+  ["Service / Material", "Description", "Qty", "Unit Price", "Total"].forEach(
+    (h, i) => doc.text(h, cols[i], y),
+  );
+  y += 5;
+  doc.setTextColor(0);
+
+  /* ── Items rows ── */
+  items.forEach((item, i) => {
+    if (y > 260) {
+      doc.addPage();
+      y = 20;
+    }
+    if (i % 2 === 0) {
+      doc.setFillColor(248, 249, 252);
+      doc.rect(lm, y - 4, 182, 7, "F");
+    }
+    doc.setFont("helvetica", "normal");
+    doc.text(String(item.name || "").slice(0, 28), cols[0], y);
+    doc.text(String(item.description || "").slice(0, 22), cols[1], y);
+    doc.text(String(item.qty ?? ""), cols[2], y);
+    doc.text(fmt(item.unitPrice), cols[3], y);
+    doc.text(fmt(item.total), cols[4], y);
+    y += 7;
+  });
+
+  /* ── Travel fee row (only if > 0) ── */
+  const travel = est.travelFee || 0;
+  if (travel > 0) {
+    if (y > 260) {
+      doc.addPage();
+      y = 20;
+    }
+    const tIdx = items.length;
+    if (tIdx % 2 === 0) {
+      doc.setFillColor(248, 249, 252);
+      doc.rect(lm, y - 4, 182, 7, "F");
+    }
+    doc.setFont("helvetica", "italic");
+    doc.text("Travel & Logistics Fee", cols[0], y);
+    doc.text(est.travelMiles ? `${est.travelMiles} mi` : "", cols[1], y);
+    doc.text("", cols[2], y);
+    doc.text("", cols[3], y);
+    doc.text(fmt(travel), cols[4], y);
+    y += 7;
+  }
+
+  y += 4;
+  doc.setDrawColor(180, 185, 200);
+  doc.line(lm, y, rr, y);
+  y += 6;
+
+  /* ── Totals ── */
+  const taxBase = subtotal + travel;
+  const taxAmt = taxBase * (taxRate / 100);
+  const grand = taxBase + taxAmt;
+  const totRow = (lbl, val, bold) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(bold ? 11 : 9);
+    doc.text(lbl, rr - 42, y, { align: "right" });
+    doc.text(val, rr, y, { align: "right" });
+    y += bold ? 8 : 6;
+  };
+  totRow("Subtotal:", fmt(subtotal), false);
+  if (travel > 0) totRow("Travel Fee:", fmt(travel), false);
+  if (taxRate > 0) totRow(`Tax (${taxRate}%):`, fmt(taxAmt), false);
+  doc.setTextColor(20, 40, 90);
+  totRow("TOTAL:", fmt(grand), true);
+  doc.setTextColor(0);
+
+  /* ── Notes ── */
+  if (est.notes) {
+    y += 4;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Notes:", lm, y);
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc
+      .splitTextToSize(est.notes, 170)
+      .slice(0, 8)
+      .forEach((l) => {
+        doc.text(l, lm, y);
+        y += 5;
+      });
+  }
+
+  /* ── Customer Signature ── */
+  if (est.signature) {
+    const sigY = Math.max(y + 8, 220);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(60, 60, 60);
+    doc.text("Customer Approval Signature:", lm, sigY);
+    doc.setDrawColor(180, 185, 200);
+    doc.line(lm, sigY + 2, rr, sigY + 2);
+    try {
+      doc.addImage(est.signature, "PNG", lm, sigY + 4, 90, 28);
+    } catch {}
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Signed: ${new Date().toLocaleDateString("en-US")}`, lm, sigY + 36);
+    doc.setTextColor(0);
+  }
+
+  /* ── Footer ── */
+  doc.setFillColor(20, 40, 90);
+  doc.rect(0, 275, 210, 22, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  const footerTxt =
+    [
+      s.company,
+      s.companyPhone,
+      s.companyEmail,
+      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "JobCost Pro — Valid for 30 days";
+  doc.text(footerTxt, 105, 285, { align: "center" });
+
+  doc.save(
+    `estimate_${(est.name || "quote").replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`,
+  );
+  toast.success("Estimate PDF exported", est.name || "");
 }
 
 /* ─── Payroll Report ─────────────────────────── */
