@@ -555,6 +555,20 @@ function bindUI() {
     applyTheme(state.settings.theme);
   });
 
+  /* Offline / online indicator */
+  const offlineEl = document.getElementById("offlineIndicator");
+  const setNetworkStatus = () => {
+    if (!offlineEl) return;
+    const online = navigator.onLine;
+    offlineEl.className = `offlineIndicator ${online ? "offlineIndicator--online" : "offlineIndicator--offline"}`;
+    offlineEl.title = online ? "Online" : "Offline — changes saved locally";
+    offlineEl.setAttribute("aria-label", `Connection status: ${online ? "online" : "offline"}`);
+    if (!online) toast.warn("Offline", "No internet — the app keeps working. Data saved locally.");
+  };
+  setNetworkStatus();
+  window.addEventListener("online", setNetworkStatus);
+  window.addEventListener("offline", setNetworkStatus);
+
   window.addEventListener("hashchange", () =>
     routeTo(location.hash.replace("#", "") || "dashboard", false),
   );
@@ -679,14 +693,18 @@ function render() {
 /* ─── Export JSON backup ─────────────────────── */
 function doExport() {
   const data = {
+    _v: 2,
+    _exported: Date.now(),
     jobs: state.jobs,
     timeLogs: state.timeLogs,
     templates: state.templates,
     estimates: state.estimates,
+    clients: state.clients,
     crew: state.crew,
     inventory: state.inventory,
     mileageLogs: state.mileageLogs,
     equipment: state.equipment,
+    settings: state.settings,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: "application/json",
@@ -699,7 +717,7 @@ function doExport() {
   URL.revokeObjectURL(a.href);
   toast.success(
     "Backup exported",
-    `${state.jobs.length} jobs · ${state.templates.length} templates.`,
+    `${state.jobs.length} jobs · ${state.clients.length} clients · settings included.`,
   );
 }
 
@@ -5833,9 +5851,31 @@ function renderBI(root) {
   const hasCosts = topJobs.some((j) => jobCost(j) > 0);
   const hasHoursEst = state.jobs.some((j) => j.estimatedHours);
 
+  /* Build last-12-months revenue & cost data */
+  const now12 = new Date();
+  const monthLabels = [];
+  const monthRevData = [];
+  const monthCostData = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now12.getFullYear(), now12.getMonth() - i, 1);
+    monthLabels.push(d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }));
+    const mJobs = state.jobs.filter((j) => {
+      const jd = new Date(j.date);
+      return jd.getFullYear() === d.getFullYear() && jd.getMonth() === d.getMonth();
+    });
+    monthRevData.push(mJobs.reduce((s, j) => s + (j.value || 0), 0));
+    monthCostData.push(mJobs.reduce((s, j) => s + jobCost(j), 0));
+  }
+  const hasMonthlyData = monthRevData.some((v) => v > 0);
+
   root.innerHTML = `
       <h2 class="pageTitle" style="margin-bottom:18px;">Analytics</h2>
       <div class="biGrid">
+        ${hasMonthlyData ? `
+        <div class="chartWrap" style="grid-column:1/-1;">
+          <h3>Monthly Revenue vs. Cost (Last 12 Months)</h3>
+          <canvas id="chartMonthly"></canvas>
+        </div>` : ""}
         <div class="chartWrap">
           <h3>Jobs by Status</h3>
           ${hasJobs ? `<canvas id="chartStatus"></canvas>` : `<div class="empty">No jobs created yet.</div>`}
@@ -5880,6 +5920,54 @@ function renderBI(root) {
       },
       x: { ticks: { color: mutedColor }, grid: { color: gridColor } },
     };
+
+    if (hasMonthlyData && $("#chartMonthly")) {
+      new Chart($("#chartMonthly"), {
+        type: "bar",
+        data: {
+          labels: monthLabels,
+          datasets: [
+            {
+              label: "Revenue",
+              data: monthRevData,
+              backgroundColor: "rgba(122,162,255,.75)",
+              borderRadius: 5,
+              order: 2,
+            },
+            {
+              label: "Cost",
+              data: monthCostData,
+              backgroundColor: "rgba(255,90,122,.65)",
+              borderRadius: 5,
+              order: 2,
+            },
+            {
+              label: "Profit",
+              data: monthRevData.map((r, i) => r - monthCostData[i]),
+              type: "line",
+              borderColor: "rgba(75,227,163,.9)",
+              backgroundColor: "rgba(75,227,163,.15)",
+              pointBackgroundColor: "rgba(75,227,163,1)",
+              borderWidth: 2,
+              tension: 0.35,
+              fill: false,
+              order: 1,
+            },
+          ],
+        },
+        options: {
+          plugins: {
+            legend: { position: "top", labels: { color: textColor } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: $${Number(ctx.raw).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`,
+              },
+            },
+          },
+          scales: scaleOpts,
+        },
+      });
+    }
 
     if (hasJobs && $("#chartStatus")) {
       new Chart($("#chartStatus"), {
@@ -6511,9 +6599,14 @@ function renderSettings(root) {
               state.estimates = estimates;
               state.mileageLogs = mileageLogs;
               state.equipment = equipment;
+              if (data.settings && typeof data.settings === "object") {
+                state.settings = { ...state.settings, ...data.settings };
+                ls(APP.lsKey).save(state.settings);
+                applyTheme(state.settings.theme);
+              }
               toast.success(
                 "Import complete",
-                `${data.jobs.length} jobs imported.`,
+                `${data.jobs.length} jobs · ${(data.clients || []).length} clients imported.`,
               );
               render();
             },
