@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v17";
+const CACHE = "jobcost-v20";
 const ASSETS = [
   "./index.html",
   "./app.js",
@@ -9,8 +9,8 @@ const ASSETS = [
   "./manifest.json",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
   "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
-  "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
-  "https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js",
+  "https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.js",
+  "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js",
 ];
 
 self.addEventListener("install", (e) => {
@@ -48,7 +48,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
   /* Network-first for CDN scripts so updates are picked up */
-  if (url.hostname === "cdn.jsdelivr.net" || url.hostname === "unpkg.com") {
+  if (url.hostname === "cdn.jsdelivr.net") {
     e.respondWith(
       fetch(e.request)
         .then((res) => {

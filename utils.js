@@ -68,8 +68,10 @@ export const ls = (key, defs = {}) => ({
   save: (v) => {
     try {
       localStorage.setItem(key, JSON.stringify(v));
+      return true;
     } catch (err) {
-      console.warn("[ls] Failed to save settings:", err);
+      console.error("[ls] Failed to save settings:", err);
+      return false;
     }
   },
 });

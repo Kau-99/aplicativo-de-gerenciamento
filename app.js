@@ -811,20 +811,27 @@ function showQRModal(job) {
       </div>
       <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 16px;">
         <canvas id="qrCanvas"></canvas>
-        <p class="small muted" style="text-align:center;max-width:280px;">Field worker scans this to open the app and clock into <strong>${esc(job.name)}</strong> directly.</p>
+        <p id="qrCanvasMsg" class="small muted" style="text-align:center;max-width:280px;">Field worker scans this to open the app and clock into <strong>${esc(job.name)}</strong> directly.</p>
         <button class="btn" id="btnCopyQR">Copy Link</button>
       </div>
       <div class="modalFt"><button class="btn" id="bjQRClose">Close</button></div>`);
   setTimeout(() => {
     const canvas = document.getElementById("qrCanvas");
-    if (canvas && window.QRCode) {
-      QRCode.toCanvas(canvas, url, { width: 220, margin: 2 }, () => {});
+    const msg = document.getElementById("qrCanvasMsg");
+    if (!canvas) return;
+    if (!window.QRCode) {
+      if (msg) msg.textContent = "QR library not loaded. Check your connection and try again.";
+      return;
     }
-  }, 60);
+    QRCode.toCanvas(canvas, url, { width: 220, margin: 2 }, (err) => {
+      if (err && msg) msg.textContent = "Could not generate QR code.";
+    });
+  }, 80);
   m.querySelector("#btnCopyQR").addEventListener("click", () => {
     navigator.clipboard
       ?.writeText(url)
-      .then(() => toast.info("Copied", "Clock-in link copied."));
+      .then(() => toast.info("Copied", "Clock-in link copied."))
+      .catch(() => toast.warn("Copy failed", "Use the link manually: " + url));
   });
   m.querySelector("#bjQRClose").addEventListener("click", modal.close);
 }
@@ -832,27 +839,33 @@ function showQRModal(job) {
 /* ─── QR Code Job Share ──────────────────────── */
 function showJobShareQR(job) {
   /* Slim payload — no photos/timeLogs to stay within QR capacity (~2KB) */
-  const slim = {
-    _v: 1,
-    id: job.id,
-    name: job.name,
-    client: job.client || "",
-    status: job.status,
-    value: job.value || 0,
-    date: job.date,
-    zip: job.zip || "",
-    city: job.city || "",
-    state: job.state || "",
-    notes: (job.notes || "").slice(0, 200),
-    tags: job.tags || [],
-    costs: (job.costs || []).slice(0, 15).map((c) => ({
-      d: c.description,
-      q: c.qty,
-      u: c.unitCost,
-      cat: c.category,
-    })),
-  };
-  const payload = JSON.stringify(slim);
+  let payload;
+  try {
+    const slim = {
+      _v: 1,
+      id: job.id,
+      name: job.name,
+      client: job.client || "",
+      status: job.status,
+      value: job.value || 0,
+      date: job.date,
+      zip: job.zip || "",
+      city: job.city || "",
+      state: job.state || "",
+      notes: (job.notes || "").slice(0, 200),
+      tags: job.tags || [],
+      costs: (job.costs || []).slice(0, 15).map((c) => ({
+        d: c.description || "",
+        q: Number(c.qty) || 0,
+        u: Number(c.unitCost) || 0,
+        cat: c.category || "",
+      })),
+    };
+    payload = JSON.stringify(slim);
+  } catch {
+    toast.error("QR Error", "Could not serialize job data.");
+    return;
+  }
 
   const m = modal.open(`
     <div class="modalHd">
@@ -862,7 +875,9 @@ function showJobShareQR(job) {
       </button>
     </div>
     <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 16px;">
-      <canvas id="shareQRCanvas"></canvas>
+      <div id="shareQRWrap" style="display:flex;align-items:center;justify-content:center;min-height:60px;">
+        <canvas id="shareQRCanvas"></canvas>
+      </div>
       <p class="small muted" style="text-align:center;max-width:300px;">
         Scan with another device running JobCost Pro to import this job.<br>
         <span style="font-size:11px;">Photos &amp; time logs are not included to keep the QR scannable.</span>
@@ -875,28 +890,25 @@ function showJobShareQR(job) {
 
   setTimeout(() => {
     const canvas = document.getElementById("shareQRCanvas");
-    if (!canvas) return;
+    const wrap = document.getElementById("shareQRWrap");
+    if (!canvas || !wrap) return;
     if (!window.QRCode) {
-      canvas.parentElement.innerHTML = `<p class="small muted">QR library not loaded yet. Try again in a moment.</p>`;
+      wrap.innerHTML = `<p class="small muted" style="color:#ff5a7a;">QR library not loaded. Check your connection and try again.</p>`;
       return;
     }
-    QRCode.toCanvas(
-      canvas,
-      payload,
-      { width: 240, margin: 2, errorCorrectionLevel: "M" },
-      (err) => {
-        if (err)
-          canvas.parentElement.insertAdjacentHTML(
-            "beforeend",
-            `<p class="small" style="color:var(--danger)">Job too large for QR (try reducing costs/notes).</p>`,
-          );
-      },
-    );
-  }, 60);
+    QRCode.toCanvas(canvas, payload, { width: 240, margin: 2, errorCorrectionLevel: "M" }, (err) => {
+      if (err) {
+        wrap.innerHTML = `<p class="small" style="color:#ff5a7a;">Job data too large for QR. Try reducing the number of cost items or shortening the notes.</p>`;
+      }
+    });
+  }, 80);
 
   m.querySelector("#btnDlShareQR")?.addEventListener("click", () => {
     const canvas = document.getElementById("shareQRCanvas");
-    if (!canvas) return;
+    if (!canvas || !canvas.width) {
+      toast.warn("Not ready", "Wait for the QR code to finish generating.");
+      return;
+    }
     const a = document.createElement("a");
     a.download = `job_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 30)}_QR.png`;
     a.href = canvas.toDataURL("image/png");
@@ -907,26 +919,22 @@ function showJobShareQR(job) {
 /* ─── QR Scanner ─────────────────────────────── */
 function openQRScanner() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    toast.warn(
-      "Camera unavailable",
-      "Camera access requires HTTPS and a supported browser.",
-    );
+    toast.warn("Camera unavailable", "Camera access requires HTTPS and a supported browser.");
     return;
   }
 
   let stream = null;
   let rafId = null;
+  let cameraTimeout = null;
+
   const stopScan = () => {
-    if (rafId) {
-      cancelAnimationFrame(rafId);
-      rafId = null;
-    }
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (cameraTimeout) { clearTimeout(cameraTimeout); cameraTimeout = null; }
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
   };
 
-  const m = modal.open(
-    `
+  const m = modal.open(`
     <div class="modalHd">
       <div><h2>📷 Scan Job QR</h2><p>Point camera at a JobCost Pro Share QR code.</p></div>
       <button type="button" class="closeX" aria-label="Close">
@@ -945,12 +953,36 @@ function openQRScanner() {
     stopScan,
   );
 
-  let useBarcodeDetector = false;
-  let detector = null;
-
-  const statusEl = () => document.getElementById("qrScanStatus");
-  const video = document.getElementById("qrVideo");
+  const statusEl = document.getElementById("qrScanStatus");
+  const video    = document.getElementById("qrVideo");
   const scanCanvas = document.getElementById("qrScanCanvas");
+
+  const setStatus = (msg, isError = false) => {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.style.color = isError ? "#ff5a7a" : "";
+  };
+
+  if (!video || !scanCanvas) {
+    setStatus("Scanner failed to initialize.", true);
+    return;
+  }
+
+  /* ── Detect best available scanner engine ── */
+  let useBarcode = false;
+  let detector = null;
+  if ("BarcodeDetector" in window) {
+    try {
+      detector = new BarcodeDetector({ formats: ["qr_code"] });
+      useBarcode = true;
+    } catch { /* BarcodeDetector constructor failed — fall through to jsQR */ }
+  }
+  const hasJsQR = typeof window.jsQR === "function";
+
+  if (!useBarcode && !hasJsQR) {
+    setStatus("QR scanning library not loaded. Check your connection and try again.", true);
+    return;
+  }
 
   const handlePayload = (data) => {
     stopScan();
@@ -961,25 +993,24 @@ function openQRScanner() {
         modal.close();
         return;
       }
-      /* Expand slim payload back to full job shape */
       const imported = {
         id: obj.id,
         name: obj.name,
         client: obj.client || "",
         status: obj.status || "Lead",
-        value: obj.value || 0,
+        value: Number(obj.value) || 0,
         date: obj.date || Date.now(),
         zip: obj.zip || "",
         city: obj.city || "",
         state: obj.state || "",
         notes: obj.notes || "",
-        tags: obj.tags || [],
+        tags: Array.isArray(obj.tags) ? obj.tags : [],
         costs: (obj.costs || []).map((c) => ({
           id: uid(),
-          description: c.d,
-          qty: c.q,
-          unitCost: c.u,
-          category: c.cat,
+          description: c.d || "",
+          qty: Number(c.q) || 0,
+          unitCost: Number(c.u) || 0,
+          category: c.cat || "",
         })),
         photos: [],
         crewIds: [],
@@ -988,12 +1019,8 @@ function openQRScanner() {
         invoiceNumber: null,
         _importedViaQR: true,
       };
-      const existing = state.jobs.find((j) => j.id === imported.id);
-      if (existing) {
-        toast.info(
-          "Already exists",
-          `"${imported.name}" is already in your jobs.`,
-        );
+      if (state.jobs.find((j) => j.id === imported.id)) {
+        toast.info("Already exists", `"${imported.name}" is already in your jobs.`);
         modal.close();
         return;
       }
@@ -1001,6 +1028,9 @@ function openQRScanner() {
         toast.success("Job imported!", imported.name);
         modal.close();
         render();
+      }).catch(() => {
+        toast.error("Import failed", "Could not save the imported job.");
+        modal.close();
       });
     } catch {
       toast.error("Scan error", "Could not parse QR data.");
@@ -1008,67 +1038,62 @@ function openQRScanner() {
     }
   };
 
-  /* ── BarcodeDetector (native, Chrome/Android) ── */
-  if ("BarcodeDetector" in window) {
-    useBarcodeDetector = true;
-    detector = new BarcodeDetector({ formats: ["qr_code"] });
-  }
+  /* ── 15-second timeout if camera never starts ── */
+  cameraTimeout = setTimeout(() => {
+    if (!stream) {
+      setStatus("Camera did not start. Allow camera permission and try again.", true);
+    }
+  }, 15000);
 
   navigator.mediaDevices
     .getUserMedia({ video: { facingMode: "environment" }, audio: false })
     .then((s) => {
+      clearTimeout(cameraTimeout);
+      cameraTimeout = null;
       stream = s;
       video.srcObject = s;
-      const st = statusEl();
-      if (st)
-        st.textContent = useBarcodeDetector ? "Scanning…" : "Scanning… (jsQR)";
+      setStatus(useBarcode ? "Scanning…" : "Scanning… (jsQR fallback)");
 
       const tick = async () => {
-        if (!video.videoWidth) {
-          rafId = requestAnimationFrame(tick);
-          return;
-        }
-        scanCanvas.width = video.videoWidth;
+        if (!stream) return; /* modal was closed */
+        if (!video.videoWidth) { rafId = requestAnimationFrame(tick); return; }
+
+        scanCanvas.width  = video.videoWidth;
         scanCanvas.height = video.videoHeight;
         const ctx = scanCanvas.getContext("2d");
         ctx.drawImage(video, 0, 0);
 
         try {
-          if (useBarcodeDetector) {
+          if (useBarcode) {
             const results = await detector.detect(video);
-            if (results.length) {
-              handlePayload(results[0].rawValue);
-              return;
-            }
-          } else if (window.jsQR) {
-            const img = ctx.getImageData(
-              0,
-              0,
-              scanCanvas.width,
-              scanCanvas.height,
-            );
-            const code = jsQR(img.data, img.width, img.height, {
-              inversionAttempts: "dontInvert",
-            });
-            if (code) {
-              handlePayload(code.data);
-              return;
-            }
+            if (results.length) { handlePayload(results[0].rawValue); return; }
+          } else {
+            const img = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+            const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
+            if (code) { handlePayload(code.data); return; }
           }
         } catch (err) {
-          console.warn("[QR] Scan frame error:", err);
+          /* BarcodeDetector may fail on some frames — fall back to jsQR silently */
+          if (useBarcode && hasJsQR) {
+            useBarcode = false;
+            setStatus("Scanning… (jsQR fallback)");
+          } else {
+            console.warn("[QR] Scan frame error:", err);
+          }
         }
         rafId = requestAnimationFrame(tick);
       };
-      video.onloadedmetadata = () => {
-        rafId = requestAnimationFrame(tick);
-      };
+
+      video.onloadedmetadata = () => { rafId = requestAnimationFrame(tick); };
     })
-    .catch(() => {
-      const st = statusEl();
-      if (st)
-        st.textContent = "Camera access denied. Allow camera and try again.";
-      if (st) st.style.color = "#ff5a7a";
+    .catch((err) => {
+      clearTimeout(cameraTimeout);
+      const msg = err?.name === "NotAllowedError"
+        ? "Camera permission denied. Allow camera access in your browser settings."
+        : err?.name === "NotFoundError"
+        ? "No camera found on this device."
+        : "Camera access failed. Try again.";
+      setStatus(msg, true);
     });
 }
 
@@ -3422,7 +3447,7 @@ function openJobModal(job) {
         phone: "",
         email: "",
         date: Date.now(),
-      });
+      }).catch(() => {});
     }
 
     /* Auto-create / update "Fuel/Travel" cost item from mileage */
@@ -6237,6 +6262,43 @@ function renderSettings(root) {
 
       </div>`;
 
+  /* Read every form field into state.settings so any save button captures the full form.
+     str()  – allows empty string, keeps old value only if element is missing from DOM
+     num()  – keeps old value when input is blank or NaN
+     date() – allows user to clear a date back to null                                  */
+  function syncAllFromDOM() {
+    const g    = (id) => root.querySelector(id);
+    const str  = (id, cur) => { const el = g(id); return el ? el.value.trim() : cur; };
+    const num  = (id, cur) => { const el = g(id); const v = parseFloat(el?.value); return isNaN(v) ? cur : v; };
+    const date = (id, cur) => { const el = g(id); return el ? (parseDate(el.value) || null) : cur; };
+
+    state.settings.role              = g("#selRole")?.value                   ?? state.settings.role;
+    state.settings.language          = g("#selLang")?.value                   ?? state.settings.language;
+    state.settings.company           = str("#selCompany",   state.settings.company);
+    state.settings.companyPhone      = str("#selPhone",     state.settings.companyPhone);
+    state.settings.companyEmail      = str("#selEmail",     state.settings.companyEmail);
+    state.settings.companyAddress    = str("#selAddress",   state.settings.companyAddress);
+    state.settings.googleReviewUrl   = str("#selReviewUrl", state.settings.googleReviewUrl);
+    state.settings.licenseNumber     = str("#selLicNum",    state.settings.licenseNumber);
+    state.settings.licenseExpiry     = date("#selLicExp",   state.settings.licenseExpiry);
+    state.settings.glInsuranceExpiry = date("#selGLExp",    state.settings.glInsuranceExpiry);
+    state.settings.wcExpiry          = date("#selWCExp",    state.settings.wcExpiry);
+    state.settings.invoicePrefix     = str("#selInvPrefix", state.settings.invoicePrefix) || "INV";
+    state.settings.defaultMarkup     = num("#selMarkup",    state.settings.defaultMarkup);
+    state.settings.minMargin         = num("#selMinMargin", state.settings.minMargin);
+    state.settings.mileageRate       = num("#selMileage",   state.settings.mileageRate);
+    state.settings.mpg               = num("#selMPG",       state.settings.mpg);
+    state.settings.gasPrice          = num("#selGasPrice",  state.settings.gasPrice);
+    const notifyEl = g("#selNotify");
+    if (notifyEl) state.settings.notificationsEnabled = notifyEl.checked;
+  }
+
+  function saveSettings() {
+    const ok = ls(APP.lsKey).save(state.settings);
+    if (ok === false) toast.error("Save failed", "Storage may be full. Free space and try again.");
+    return ok !== false;
+  }
+
   const installBtn = root.querySelector("#btnInstallApp");
   if (installBtn) {
     if (deferredPrompt) installBtn.style.display = "flex";
@@ -6252,9 +6314,8 @@ function renderSettings(root) {
   }
 
   root.querySelector("#btnSave")?.addEventListener("click", () => {
-    state.settings.role = root.querySelector("#selRole").value;
-    state.settings.language = root.querySelector("#selLang").value;
-    ls(APP.lsKey).save(state.settings);
+    syncAllFromDOM();
+    if (!saveSettings()) return;
     document.body.setAttribute("data-role", state.settings.role);
     if (state.settings.role === "field") {
       routeTo("field");
@@ -6265,16 +6326,8 @@ function renderSettings(root) {
   });
 
   root.querySelector("#btnSaveBranding")?.addEventListener("click", () => {
-    state.settings.company = root.querySelector("#selCompany").value.trim();
-    state.settings.companyPhone = root.querySelector("#selPhone").value.trim();
-    state.settings.companyEmail = root.querySelector("#selEmail").value.trim();
-    state.settings.companyAddress = root
-      .querySelector("#selAddress")
-      .value.trim();
-    state.settings.googleReviewUrl = root
-      .querySelector("#selReviewUrl")
-      .value.trim();
-    ls(APP.lsKey).save(state.settings);
+    syncAllFromDOM();
+    if (!saveSettings()) return;
     toast.success("Branding saved", "Company info updated.");
     render();
   });
@@ -6308,7 +6361,7 @@ function renderSettings(root) {
         c.height = h;
         c.getContext("2d").drawImage(img, 0, 0, w, h);
         state.settings.logoDataUrl = c.toDataURL("image/png");
-        ls(APP.lsKey).save(state.settings);
+        if (!saveSettings()) return;
         toast.success("Logo saved", `${w}×${h} px`);
         render();
       };
@@ -6319,44 +6372,23 @@ function renderSettings(root) {
 
   root.querySelector("#btnRemoveLogo")?.addEventListener("click", () => {
     state.settings.logoDataUrl = null;
-    ls(APP.lsKey).save(state.settings);
+    if (!saveSettings()) return;
     toast.info("Logo removed", "");
     render();
   });
 
   root.querySelector("#btnSaveCompliance")?.addEventListener("click", () => {
-    state.settings.licenseNumber = root
-      .querySelector("#selLicNum")
-      .value.trim();
-    state.settings.licenseExpiry = parseDate(
-      root.querySelector("#selLicExp").value,
-    );
-    state.settings.glInsuranceExpiry = parseDate(
-      root.querySelector("#selGLExp").value,
-    );
-    state.settings.wcExpiry = parseDate(root.querySelector("#selWCExp").value);
-    ls(APP.lsKey).save(state.settings);
+    syncAllFromDOM();
+    if (!saveSettings()) return;
     toast.success("Compliance saved", "License & insurance info updated.");
     render();
   });
 
   root.querySelector("#btnSaveDefaults")?.addEventListener("click", () => {
-    state.settings.invoicePrefix =
-      root.querySelector("#selInvPrefix").value.trim() || "INV";
-    state.settings.defaultMarkup =
-      parseFloat(root.querySelector("#selMarkup").value) || 0;
-    state.settings.minMargin =
-      parseFloat(root.querySelector("#selMinMargin").value) ?? 30;
-    state.settings.mileageRate =
-      parseFloat(root.querySelector("#selMileage").value) || 0.67;
-    state.settings.mpg = parseFloat(root.querySelector("#selMPG").value) || 15;
-    state.settings.gasPrice =
-      parseFloat(root.querySelector("#selGasPrice").value) || 3.5;
-    const notifyEl = root.querySelector("#selNotify");
     const wasEnabled = state.settings.notificationsEnabled;
-    state.settings.notificationsEnabled = notifyEl.checked;
+    syncAllFromDOM();
     if (
-      notifyEl.checked &&
+      state.settings.notificationsEnabled &&
       !wasEnabled &&
       Notification.permission === "default"
     ) {
@@ -6373,7 +6405,7 @@ function renderSettings(root) {
           );
       });
     }
-    ls(APP.lsKey).save(state.settings);
+    if (!saveSettings()) return;
     toast.success("Defaults saved", "Job defaults updated.");
     render();
   });
