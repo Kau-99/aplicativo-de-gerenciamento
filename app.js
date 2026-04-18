@@ -2697,8 +2697,10 @@ function exportTaxSummaryPDF(year) {
   const mileageDeduction = state.mileageLogs
     .filter((ml) => new Date(ml.date).getFullYear() === year)
     .reduce((sum, ml) => sum + (ml.deduction || 0), 0);
-  const taxableIncome =
-    totalRevenue - totalMaterial - totalLabor - mileageDeduction;
+  /* Taxable income = Revenue - Job Costs - Mileage.
+     Labor (from crew time logs) is shown separately for reference but NOT
+     subtracted — it is typically already included in job cost line items. */
+  const taxableIncome = totalRevenue - totalMaterial - mileageDeduction;
 
   /* Quarterly breakdown */
   const quarters = [0, 0, 0, 0];
@@ -2756,14 +2758,20 @@ function exportTaxSummaryPDF(year) {
   doc.text("DEDUCTIBLE EXPENSES", lm, y);
   y += 8;
   doc.setTextColor(0);
-  r("Material / Job Costs", fmt(totalMaterial), false);
-  r("Labor Costs", fmt(totalLabor), false);
+  r("Job Costs (materials, labor, items)", fmt(totalMaterial), false);
   r("Mileage Deduction", fmt(mileageDeduction), false);
-  r(
-    "Total Expenses:",
-    fmt(totalMaterial + totalLabor + mileageDeduction),
-    true,
-  );
+  r("Total Deductible Expenses:", fmt(totalMaterial + mileageDeduction), true);
+  if (totalLabor > 0) {
+    y += 2;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`* Crew labor from time logs: ${fmt(totalLabor)} (for reference — may already be included above)`, lm, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    y += 6;
+  }
   y += 4;
   doc.setDrawColor(200);
   doc.line(lm, y, rr, y);
@@ -2991,6 +2999,7 @@ function openTaxSummaryModal() {
     const mileageDed = state.mileageLogs
       .filter((ml) => new Date(ml.date).getFullYear() === year)
       .reduce((sum, ml) => sum + (ml.deduction || 0), 0);
+    const taxableIncome = totalRevenue - totalMaterial - mileageDed;
     const quarters = [0, 0, 0, 0];
     yearJobs.forEach((j) => {
       const q = Math.floor(new Date(j.date).getMonth() / 3);
@@ -3000,9 +3009,9 @@ function openTaxSummaryModal() {
         <div class="summary">
           <div class="summaryRow"><span class="k">Jobs in ${year}</span><strong>${yearJobs.length}</strong></div>
           <div class="summaryRow"><span class="k">Total Revenue</span><strong>${fmt(totalRevenue)}</strong></div>
-          <div class="summaryRow"><span class="k">Material Costs</span><strong>${fmt(totalMaterial)}</strong></div>
+          <div class="summaryRow"><span class="k">Job Costs (materials, labor, etc.)</span><strong>${fmt(totalMaterial)}</strong></div>
           <div class="summaryRow"><span class="k">Mileage Deduction</span><strong>${fmt(mileageDed)}</strong></div>
-          <div class="summaryRow total"><span class="k">Est. Taxable Income</span><strong>${fmt(totalRevenue - totalMaterial - mileageDed)}</strong></div>
+          <div class="summaryRow total"><span class="k">Est. Taxable Income</span><strong>${fmt(taxableIncome)}</strong></div>
         </div>
         <div style="margin-top:12px;">
           <div class="sectionLabel">Quarterly Revenue</div>
@@ -6139,7 +6148,7 @@ function renderBI(root) {
     .sort((a, b) => jobCost(b) - jobCost(a))
     .slice(0, 8);
   const hrsByJob = state.timeLogs.reduce((a, l) => {
-    a[l.jobId] = (a[l.jobId] || 0) + l.hours;
+    a[l.jobId] = (a[l.jobId] || 0) + (l.hours || 0);
     return a;
   }, {});
 
@@ -7453,15 +7462,20 @@ function openAtticCalcModal(estimateModalEl, onApply) {
     if (sqftEl && !sqftEl.value) sqftEl.value = r.sqft;
     if (itEl && !itEl.value) itEl.value = "Blown-in Fiberglass";
     if (atEl && !atEl.value) atEl.value = "Attic";
-    /* Build line items and push via callback (Sprint 24) */
+    /* Build line items and push via callback — markup distributed into unit prices */
+    const mf = 1 + r.markup / 100; /* markup factor, 1.0 when no markup */
+    const matUnitPrice = +(r.bagCost * mf).toFixed(2);
+    const matTotal     = +(r.bags * matUnitPrice).toFixed(2);
     const matItem = {
       id: uid(),
       name: "Attic Material",
       description: `${r.bags} bags × ${r.coverage} sqft/bag @ ${fmt(r.bagCost)}/bag`,
       qty: r.bags,
-      unitPrice: +r.bagCost.toFixed(2),
-      total: +r.matCost.toFixed(2),
+      unitPrice: matUnitPrice,
+      total: matTotal,
     };
+    const laborUnitPrice = r.totalLabor > 0 ? +(r.laborRatePerSqft * mf).toFixed(4) : 0;
+    const laborTotal     = r.totalLabor > 0 ? +(r.sqft * laborUnitPrice).toFixed(2) : 0;
     const laborItem =
       r.totalLabor > 0
         ? {
@@ -7469,8 +7483,8 @@ function openAtticCalcModal(estimateModalEl, onApply) {
             name: "Attic Labor",
             description: `${r.sqft} sqft × $${r.laborRatePerSqft.toFixed(2)}/sqft`,
             qty: r.sqft,
-            unitPrice: +r.laborRatePerSqft.toFixed(4),
-            total: +r.totalLabor.toFixed(2),
+            unitPrice: laborUnitPrice,
+            total: laborTotal,
           }
         : null;
     modal.close();
@@ -7909,8 +7923,9 @@ function openEstimateModal(est) {
       return;
     }
     clEl.classList.remove("invalid");
-    const taxRate = parseFloat(m.querySelector("#eTax").value) || 0;
-    const subtotal = computeSubtotal();
+    const taxRate    = parseFloat(m.querySelector("#eTax").value) || 0;
+    const subtotal   = computeSubtotal();
+    const travelFeeVal = getTravelFeeValue();   /* compute once — used in both travelFee and value */
     const saved = {
       id: isEdit ? est.id : uid(),
       name: isEdit ? est.name : getNextEstimateNumber(),
@@ -7930,11 +7945,9 @@ function openEstimateModal(est) {
       date: isEdit ? est.date : Date.now(),
       sentDate: isEdit ? est.sentDate : null,
       items: lineItems,
-      travelFee: getTravelFeeValue(),
+      travelFee: travelFeeVal,
       travelMiles: parseFloat(m.querySelector("#eTravelMiles")?.value) || 0,
-      value: +((subtotal + getTravelFeeValue()) * (1 + taxRate / 100)).toFixed(
-        2,
-      ),
+      value: +((subtotal + travelFeeVal) * (1 + taxRate / 100)).toFixed(2),
       signature: pendingSignature || null,
       followUpDate: parseDate(m.querySelector("#eFollowUp")?.value) || null,
     };
