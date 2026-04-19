@@ -177,25 +177,48 @@ function attachVoiceToAll(container) {
         state.settings.language === "es"
           ? "es-ES"
           : navigator.language || "en-US";
-      recognition.interimResults = false;
-      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.continuous = true;
       recognition.maxAlternatives = 1;
+
+      let baseText = ta.value;
 
       recognition.onstart = () => {
         listening = true;
+        baseText = ta.value;
         btn.classList.add("voiceMicBtn--active");
         btn.title = "Click to stop";
-        ta.placeholder = "Listening… Speak slowly";
+        ta.placeholder = "🎙 Listening… speak now";
       };
 
       recognition.onresult = (ev) => {
-        const transcript = ev.results[0]?.[0]?.transcript ?? "";
-        if (transcript) {
-          ta.value = ta.value
-            ? ta.value.trimEnd() + " " + transcript
-            : transcript;
-          ta.dispatchEvent(new Event("input", { bubbles: true }));
+        let finalChunk = "";
+        let interimChunk = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) finalChunk += t;
+          else interimChunk += t;
         }
+        if (finalChunk) {
+          baseText = baseText
+            ? baseText.trimEnd() + " " + finalChunk.trim()
+            : finalChunk.trim();
+          ta.value = baseText;
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+        } else if (interimChunk) {
+          ta.value = baseText
+            ? baseText.trimEnd() + " " + interimChunk
+            : interimChunk;
+        }
+      };
+
+      const resetVoiceState = () => {
+        listening = false;
+        btn.classList.remove("voiceMicBtn--active");
+        btn.title = "Speak to type";
+        ta.placeholder = origPlaceholder;
+        ta.value = baseText;
+        recognition = null;
       };
 
       recognition.onerror = (ev) => {
@@ -204,17 +227,17 @@ function attachVoiceToAll(container) {
             "Microphone blocked",
             "Allow microphone access in your browser settings.",
           );
-        } else if (ev.error !== "aborted" && ev.error !== "no-speech") {
+          resetVoiceState();
+        } else if (ev.error === "no-speech") {
+          /* ignore silently */
+        } else if (ev.error !== "aborted") {
           toast.warn("Voice error", ev.error);
+          resetVoiceState();
         }
       };
 
       recognition.onend = () => {
-        listening = false;
-        btn.classList.remove("voiceMicBtn--active");
-        btn.title = "Speak to type";
-        ta.placeholder = origPlaceholder;
-        recognition = null;
+        resetVoiceState();
       };
 
       recognition.start();
@@ -6234,6 +6257,13 @@ function renderBI(root) {
       },
       x: { ticks: { color: mutedColor }, grid: { color: gridColor } },
     };
+
+    /* Destroy any existing Chart instances before re-creating — prevents
+       "Canvas is already in use" error when navigating away and back. */
+    ["chartMonthly","chartStatus","chartTime","chartCosts","chartHours"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) Chart.getChart(el)?.destroy();
+    });
 
     if (hasMonthlyData && $("#chartMonthly")) {
       new Chart($("#chartMonthly"), {
