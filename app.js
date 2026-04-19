@@ -145,15 +145,20 @@ function attachVoiceToAll(container) {
     btn.innerHTML = micSVG;
     wrap.appendChild(btn);
 
-    if (!SR) {
+    const isSecure =
+      location.protocol === "https:" ||
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1";
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+    if (!SR || !isSecure || isIOS) {
       btn.disabled = true;
       btn.classList.add("voiceMicBtn--disabled");
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
       btn.title = isIOS
-        ? "Voice input not supported on iOS Safari. Use Chrome on Android."
-        : location.protocol !== "https:" && location.hostname !== "localhost"
-          ? "Voice input requires HTTPS. Host the app on a secure URL."
-          : "Voice input not supported in this browser.";
+        ? "Voice input not supported on iOS Safari. Use Chrome on Android or desktop."
+        : !isSecure
+          ? "Voice input requires HTTPS. Open the app from its published URL."
+          : "Voice input not supported in this browser. Use Chrome or Edge.";
       btn.setAttribute("aria-label", "Voice input unavailable");
       return;
     }
@@ -222,18 +227,17 @@ function attachVoiceToAll(container) {
       };
 
       recognition.onerror = (ev) => {
-        if (ev.error === "not-allowed") {
-          toast.warn(
-            "Microphone blocked",
-            "Allow microphone access in your browser settings.",
-          );
-          resetVoiceState();
-        } else if (ev.error === "no-speech") {
-          /* ignore silently */
-        } else if (ev.error !== "aborted") {
-          toast.warn("Voice error", ev.error);
-          resetVoiceState();
-        }
+        const msgs = {
+          "not-allowed":       ["Microphone blocked", "Allow mic access in your browser settings, then try again."],
+          "service-not-allowed": ["HTTPS required", "Voice input only works when the app is served over HTTPS or localhost."],
+          "network":           ["Connection failed", "Chrome sends voice audio to Google's servers — this requires HTTPS + internet. Open the app from its published HTTPS URL."],
+          "audio-capture":     ["No microphone", "No microphone was found. Plug one in or check device settings."],
+          "language-not-supported": ["Language not supported", "Try switching the app language to English in Settings."],
+        };
+        if (ev.error === "no-speech" || ev.error === "aborted") return;
+        const [title, msg] = msgs[ev.error] || ["Voice error", `Error: ${ev.error}. Try again in Chrome over HTTPS.`];
+        toast.warn(title, msg);
+        resetVoiceState();
       };
 
       recognition.onend = () => {
